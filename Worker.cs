@@ -1,0 +1,193 @@
+using Makaretu.Dns;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace MyLanService
+{
+    public class Worker : BackgroundService
+    {
+        private readonly ILogger<Worker> _logger;
+        // private TcpListener _tcpListener;
+        private TcpApiServer _tcpApiServer;
+
+        private const int TcpPort = 5000;
+        private const int HttpPort = 7890;
+        private MulticastService _mdns;
+        private ServiceDiscovery _serviceDiscovery;
+
+        private HttpApiHost _httpApiHost;
+
+
+        public Worker(ILogger<Worker> logger)
+        {
+            _logger = logger;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            _logger.LogInformation("TCP Server starting...");
+
+            try
+            {
+                // Initialize the TCP listener with address reuse enabled.
+                // _tcpListener = new TcpListener(IPAddress.Any, Port);
+                // _tcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                // _tcpListener.Start();
+                _tcpApiServer = new TcpApiServer(TcpPort, _logger);
+                var tcpTask = _tcpApiServer.StartAsync(stoppingToken);
+
+                _httpApiHost = new HttpApiHost(HttpPort, _logger);
+                var httpTask = _httpApiHost.StartAsync(stoppingToken);
+
+                _logger.LogInformation("HTTP API Server started on port 7890");
+
+                // _logger.LogInformation($"TCP Server started on port {Port}");
+
+                // Initialize mDNS components.
+                _mdns = new MulticastService();
+
+                foreach (var a in MulticastService.GetIPAddresses())
+                {
+                    Console.WriteLine($"IP address {a}");
+                }
+
+                // _mdns.QueryReceived += (s, e) =>
+                // {
+                //     var names = e.Message.Questions
+                //         .Select(q => q.Name + " " + q.Type);
+                //     Console.WriteLine($"got a query for {String.Join(", ", names)}");
+                // };
+
+                // _mdns.AnswerReceived += (s, e) =>
+                // {
+                //     var names = e.Message.Answers
+                //         .Select(q => q.Name + " " + q.Type)
+                //         .Distinct();
+                //     Console.WriteLine($"got answer for {String.Join(", ", names)}");
+                // };
+
+                // _mdns.NetworkInterfaceDiscovered += (s, e) =>
+                // {
+                //     foreach (var nic in e.NetworkInterfaces)
+                //     {
+                //         Console.WriteLine($"discovered NIC '{nic.Name}'");
+                //     }
+                // };
+
+
+                _serviceDiscovery = new ServiceDiscovery(_mdns);
+
+                // Get system hostname and local network IP address.
+                string systemHostname = Dns.GetHostName();
+                IPAddress localIP = GetLocalIPAddress();
+
+                // Create a service profile with your hostname and port.
+                var serviceProfile = new ServiceProfile(
+                    instanceName: systemHostname,  // Friendly name for your service
+                    serviceName: "_license-server._tcp",         // Service type (without .local)
+                    port: HttpPort
+                );
+
+                // Optionally, add a TXT record.
+                serviceProfile.AddProperty("description", "My TCP Server Service");
+                // Map the service to your local network IP address.
+                // serviceProfile.Addresses.Add(localIP);
+
+                // Advertise the service via mDNS.
+                _serviceDiscovery.Advertise(serviceProfile);
+                _mdns.Start();
+                _logger.LogInformation($"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}");
+
+                // Wait for TCP server to complete (usually runs until cancellation)
+                await Task.WhenAll(tcpTask, httpTask);
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error: {ex.Message}");
+            }
+            finally
+            {
+                _tcpApiServer?.Stop();
+                _serviceDiscovery?.Dispose();
+                _mdns?.Stop();
+                _mdns?.Dispose();
+            }
+        }
+
+        // Helper method to retrieve the local IPv4 address.
+        private IPAddress GetLocalIPAddress()
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up)
+                    continue;
+
+                var ipProps = ni.GetIPProperties();
+                foreach (var ua in ipProps.UnicastAddresses)
+                {
+                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork &&
+                        !IPAddress.IsLoopback(ua.Address))
+                    {
+                        return ua.Address;
+                    }
+                }
+            }
+            throw new Exception("No network adapters with an IPv4 address in the system!");
+        }
+
+        // private async Task HandleClient(TcpClient client)
+        // {
+        //     using (NetworkStream stream = client.GetStream())
+        //     {
+        //         byte[] buffer = new byte[1024];
+        //         int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+        //         string receivedData = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+        //         _logger.LogInformation($"Received: {receivedData}");
+
+        //         byte[] response = Encoding.UTF8.GetBytes("Message received!");
+        //         await stream.WriteAsync(response, 0, response.Length);
+        //     }
+        // }
+
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Stopping Worker...");
+
+            try
+            {
+                if (_httpApiHost is not null)
+                {
+                    await _httpApiHost.StopAsync(cancellationToken);
+                }
+
+                _tcpApiServer?.Stop();
+                _serviceDiscovery?.Dispose();
+
+                if (_mdns is not null)
+                {
+                    _mdns.Stop();
+                    _mdns.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during shutdown");
+            }
+            finally
+            {
+                await base.StopAsync(cancellationToken);
+            }
+        }
+
+
+    }
+}
