@@ -2,7 +2,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Http;
-using System;
+using System.Text.Json;
+using System.Text;
+using System.Security.Cryptography;
+using System.IO;
+
 
 namespace MyLanService
 {
@@ -12,10 +16,17 @@ namespace MyLanService
         private readonly ILogger _logger;
         private WebApplication _app;
 
+        private readonly HttpClient _httpClient;
+
         public HttpApiHost(int port, ILogger logger)
         {
             _port = port;
             _logger = logger;
+            _httpClient = new HttpClient(new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true // Ignore SSL errors for testing purposes
+            });
+
         }
         public async Task StartAsync(CancellationToken stoppingToken)
         {
@@ -26,6 +37,10 @@ namespace MyLanService
                 .AddNewtonsoftJson();
 
             var app = builder.Build();
+
+            // ✅ Load encrypted license info & init license manager
+            var licenseInfo = LicenseInfoProvider.Instance.GetLicenseInfo();
+            _logger.LogInformation("License Loaded: MaxUsers = {0}, Key = {1}", licenseInfo.NumberOfUsers, licenseInfo.LicenseKey);
 
             app.MapGet("/api/health", () =>
             {
@@ -61,30 +76,167 @@ namespace MyLanService
                 return Results.Content(html, "text/html");
             });
 
-            app.MapPost("/api/check-license", async (HttpContext context) =>
+            app.MapPost("/api/license/assign", async (HttpContext context) =>
             {
-                var json = await context.Request.ReadFromJsonAsync<dynamic>();
-                string licenseKey = json?.licenseKey ?? "";
+                return await HandleLicenseAssign(context);
+            });
 
-                if (licenseKey == "ABC-123-XYZ")
+            app.MapPost("/api/license/release", async (HttpContext context) =>
+            {
+                return await HandleLicenseRelease(context);
+            });
+
+
+
+            app.MapPost("/api/validate-license", async (HttpContext context) =>
+            {
+                try
                 {
-                    return Results.Ok(new
+                    var json = await context.Request.ReadFromJsonAsync<Dictionary<string, object>>();
+
+                    // Validate incoming Electron data
+                    if (!json.ContainsKey("licenseKey") || !json.ContainsKey("username") || !json.ContainsKey("uuid_hash"))
+                        return Results.BadRequest(new { error = "Missing required fields" });
+
+                    // Construct Django request payload
+                    var djangoPayload = new
                     {
-                        status = "ok",
-                        message = "License valid",
-                        data = new { expires = "2025-12-31", plan = "Pro" }
-                    });
-                }
+                        license_key = json["licenseKey"],
+                        username = json["username"],
+                        uuid_hash = json["uuid_hash"],
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                        is_activated = true // or false based on context
+                    };
 
-                return Results.BadRequest(new
+                    var requestBody = new StringContent(
+                        JsonSerializer.Serialize(djangoPayload),
+                        Encoding.UTF8,
+                        "application/json"
+                    );
+
+                    var djangoRequest = new HttpRequestMessage
+                    {
+                        Method = HttpMethod.Post,
+                        RequestUri = new Uri("https://152e-103-184-104-244.ngrok-free.app/api/activate-offline-license/"), // Your Django URL
+                        Content = requestBody
+                    };
+
+                    // 🔐 Add API key header just for this request
+                    djangoRequest.Headers.Add("X-API-Key", "L4#gP93NEuzyXQFYAGk_KhY2SDHzJJ-O0fqFMlxJ46HZkNLtpdBI.CAgICAgICAk=");
+
+                    var response = await _httpClient.SendAsync(djangoRequest);
+                    var resultContent = await response.Content.ReadAsStringAsync();
+                    if (response.IsSuccessStatusCode)
+                    {
+
+
+                        // ✅ Save encrypted license securely
+                        var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                        string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                            ? Directory.GetCurrentDirectory()
+                            : AppContext.BaseDirectory;
+
+                        string licenseFilePath = Path.Combine(baseDir, "license.enc");
+                        byte[] plainBytes = Encoding.UTF8.GetBytes(resultContent);
+
+                        // 🔐 Generate encryption key from machine-locked fingerprint (not stored anywhere)
+                        string fingerprint = Environment.MachineName + Environment.UserName;
+                        using var deriveBytes = new Rfc2898DeriveBytes(fingerprint, Encoding.UTF8.GetBytes("YourSuperSalt!@#"), 100_000, HashAlgorithmName.SHA256);
+                        byte[] aesKey = deriveBytes.GetBytes(32); // AES-256
+                        byte[] aesIV = deriveBytes.GetBytes(16);  // 128-bit IV
+
+                        byte[] encryptedBytes;
+
+                        using (var aes = Aes.Create())
+                        {
+                            aes.Key = aesKey;
+                            aes.IV = aesIV;
+                            aes.Mode = CipherMode.CBC;
+                            aes.Padding = PaddingMode.PKCS7;
+
+                            using var encryptor = aes.CreateEncryptor();
+                            encryptedBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+                        }
+
+                        await File.WriteAllBytesAsync(licenseFilePath, encryptedBytes);
+                        _logger.LogInformation("License information securely saved at {0}", licenseFilePath);
+
+                        return Results.Ok(JsonDocument.Parse(resultContent).RootElement);
+                    }
+                    _logger.LogError("Django API returned error: {0}", resultContent);
+
+                    return Results.BadRequest(JsonDocument.Parse(resultContent).RootElement);
+                }
+                catch (Exception ex)
                 {
-                    status = "invalid",
-                    message = "License key not recognized"
-                });
+                    _logger.LogError("Error calling Django validation API: {0}", ex.Message);
+                    return Results.Problem("Internal Server Error during license validation.");
+                }
             });
 
             await app.RunAsync($"http://0.0.0.0:{_port}"); ; // ✅ No URL here, only token
         }
+
+        private async Task<IResult> HandleLicenseAssign(HttpContext context)
+        {
+            var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+            if (json == null || !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId))
+                return Results.BadRequest(new { error = "Missing or invalid clientId." });
+
+            var licenseInfo = LicenseInfoProvider.Instance.GetLicenseInfo();
+
+            if (licenseInfo == null ||
+                string.IsNullOrWhiteSpace(licenseInfo.LicenseKey) ||
+                licenseInfo.ExpiryTimestamp <= 0 ||
+                licenseInfo.NumberOfUsers <= 0)
+            {
+                return Results.Json(
+                    new { error = "License not loaded, corrupted, or invalid." },
+                    statusCode: StatusCodes.Status500InternalServerError
+                );
+            }
+
+            var maxUsers = licenseInfo.NumberOfUsers > 0 ? licenseInfo.NumberOfUsers : 1;
+            var _licenseManager = LicenseStateManager.Instance;
+
+            // Check if already assigned or maxed out
+            if (_licenseManager.TryUseLicense(clientId, out var message))
+            {
+                return Results.Ok(new
+                {
+                    success = true,
+                    clientId,
+                    message,
+                    activeCount = _licenseManager.ActiveCount,
+                    maxUsers
+                });
+            }
+
+            return Results.Json(new { error = message, activeCount = _licenseManager.ActiveCount, maxUsers }, statusCode: StatusCodes.Status429TooManyRequests);
+        }
+
+        private async Task<IResult> HandleLicenseRelease(HttpContext context)
+        {
+            var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+            if (json == null || !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId))
+                return Results.BadRequest(new { error = "Missing or invalid clientId." });
+
+            var _licenseManager = LicenseStateManager.Instance;
+
+            if (_licenseManager.ReleaseLicense(clientId, out var message))
+            {
+                return Results.Ok(new
+                {
+                    success = true,
+                    clientId,
+                    message,
+                    activeCount = _licenseManager.ActiveCount
+                });
+            }
+
+            return Results.BadRequest(new { error = message });
+        }
+
 
 
         public async Task StopAsync(CancellationToken cancellationToken)
