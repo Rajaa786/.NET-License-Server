@@ -87,8 +87,100 @@ namespace MyLanService
             });
 
 
-
             app.MapPost("/api/validate-license", async (HttpContext context) =>
+            {
+                try
+                {
+                    var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                    string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                        ? Directory.GetCurrentDirectory()
+                        : AppContext.BaseDirectory;
+
+                    string licenseFilePath = Path.Combine(baseDir, "license.enc");
+                    if (!File.Exists(licenseFilePath))
+                    {
+                        return Results.Json(new
+                        {
+                            status = "ERROR",
+                            message = "License file not found"
+                        }, statusCode: StatusCodes.Status404NotFound);
+                    }
+
+                    byte[] encryptedBytes = await File.ReadAllBytesAsync(licenseFilePath);
+
+                    string fingerprint = Environment.MachineName + Environment.UserName;
+                    using var deriveBytes = new Rfc2898DeriveBytes(fingerprint, Encoding.UTF8.GetBytes("YourSuperSalt!@#"), 100_000, HashAlgorithmName.SHA256);
+                    byte[] aesKey = deriveBytes.GetBytes(32);
+                    byte[] aesIV = deriveBytes.GetBytes(16);
+
+                    string decryptedJson;
+
+                    using (var aes = Aes.Create())
+                    {
+                        aes.Key = aesKey;
+                        aes.IV = aesIV;
+                        aes.Mode = CipherMode.CBC;
+                        aes.Padding = PaddingMode.PKCS7;
+
+                        using var decryptor = aes.CreateDecryptor();
+                        byte[] plainBytes = decryptor.TransformFinalBlock(encryptedBytes, 0, encryptedBytes.Length);
+                        decryptedJson = Encoding.UTF8.GetString(plainBytes);
+                    }
+
+                    var jsonDoc = JsonDocument.Parse(decryptedJson);
+                    var root = jsonDoc.RootElement;
+
+                    var expiryElement = root.GetProperty("expiry_timestamp");
+                    long expiryTimestamp = expiryElement.ValueKind switch
+                    {
+                        JsonValueKind.Number => (long)expiryElement.GetDouble(),
+                        JsonValueKind.String when double.TryParse(expiryElement.GetString(), out var val) => (long)val,
+                        _ => throw new FormatException("expiry_timestamp is not a valid number.")
+                    };
+                    long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+                    if (expiryTimestamp < currentTimestamp)
+                    {
+                        return Results.Json(new
+                        {
+                            status = "EXPIRED",
+                            message = "License has expired",
+                            expiry_timestamp = expiryTimestamp,
+                            current_timestamp = currentTimestamp
+                        }, statusCode: StatusCodes.Status403Forbidden);
+                    }
+
+                    return Results.Json(new
+                    {
+                        status = "OK",
+                        license_key = root.GetProperty("license_key").GetString(),
+                        username = root.GetProperty("username").GetString(),
+                        number_of_users = root.GetProperty("number_of_users").GetInt32(),
+                        number_of_statements = root.GetProperty("number_of_statements").GetInt32(),
+                        expiry_timestamp = expiryTimestamp,
+                        current_timestamp = currentTimestamp
+                    }, statusCode: StatusCodes.Status200OK);
+                }
+                catch (CryptographicException)
+                {
+                    return Results.Json(new
+                    {
+                        status = "ERROR",
+                        message = "Decryption failed. Possibly invalid fingerprint or corrupted file."
+                    }, statusCode: StatusCodes.Status401Unauthorized);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error validating license");
+                    return Results.Json(new
+                    {
+                        status = "ERROR",
+                        message = ex.Message
+                    }, statusCode: StatusCodes.Status500InternalServerError);
+                }
+            });
+
+            app.MapPost("/api/activate-license", async (HttpContext context) =>
             {
                 try
                 {
@@ -117,7 +209,7 @@ namespace MyLanService
                     var djangoRequest = new HttpRequestMessage
                     {
                         Method = HttpMethod.Post,
-                        RequestUri = new Uri("https://152e-103-184-104-244.ngrok-free.app/api/activate-offline-license/"), // Your Django URL
+                        RequestUri = new Uri("http://localhost:8000/api/activate-offline-license/"), // Your Django URL
                         Content = requestBody
                     };
 
@@ -198,6 +290,8 @@ namespace MyLanService
 
             var maxUsers = licenseInfo.NumberOfUsers > 0 ? licenseInfo.NumberOfUsers : 1;
             var _licenseManager = LicenseStateManager.Instance;
+
+            _logger.LogInformation("License manager active count: {0}, {0}", _licenseManager.ActiveCount, maxUsers);
 
             // Check if already assigned or maxed out
             if (_licenseManager.TryUseLicense(clientId, out var message))
