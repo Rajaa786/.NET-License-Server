@@ -1,17 +1,32 @@
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 
 namespace MyLanService
 {
     public class LicenseInfo
     {
+        [JsonPropertyName("license_key")]
         public string LicenseKey { get; set; }
+
+        [JsonPropertyName("username")]
         public string Username { get; set; }
+
+        [JsonPropertyName("current_timestamp")]
         public double CurrentTimestamp { get; set; }
+
+        [JsonPropertyName("expiry_timestamp")]
         public double ExpiryTimestamp { get; set; }
+
+        [JsonPropertyName("number_of_users")]
         public int NumberOfUsers { get; set; }
+
+        [JsonPropertyName("number_of_statements")]
         public int NumberOfStatements { get; set; }
+
+        public override string ToString() => JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+
     }
 
     public sealed class LicenseInfoProvider
@@ -24,6 +39,7 @@ namespace MyLanService
         private LicenseInfoProvider()
         {
             _licenseInfo = LoadLicenseInfo();
+            Console.WriteLine($"LicenseInfoProvider initialized: {_licenseInfo}");
         }
 
         public LicenseInfo GetLicenseInfo() => _licenseInfo;
@@ -32,11 +48,18 @@ namespace MyLanService
         {
             try
             {
-                string baseDir = Directory.GetCurrentDirectory();
+                var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                    ? Directory.GetCurrentDirectory()
+                    : AppContext.BaseDirectory;
                 string licenseFilePath = Path.Combine(baseDir, "license.enc");
 
                 if (!File.Exists(licenseFilePath))
+                {
+                    Console.WriteLine($"License file not found at {licenseFilePath}");
                     return new LicenseInfo(); // fallback
+                }
+                Console.WriteLine($"License file found at {licenseFilePath}");
 
                 byte[] encryptedBytes = File.ReadAllBytes(licenseFilePath);
                 string fingerprint = Environment.MachineName + Environment.UserName;
@@ -55,6 +78,7 @@ namespace MyLanService
                 byte[] decryptedBytes = decryptor.TransformFinalBlock(encryptedBytes, 0, encryptedBytes.Length);
 
                 string json = Encoding.UTF8.GetString(decryptedBytes);
+
                 return JsonSerializer.Deserialize<LicenseInfo>(json) ?? new LicenseInfo();
             }
             catch
@@ -62,5 +86,6 @@ namespace MyLanService
                 return new LicenseInfo(); // fallback on error
             }
         }
+
     }
 }

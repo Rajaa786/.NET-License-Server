@@ -37,6 +37,11 @@ namespace MyLanService
 
             try
             {
+
+                // This triggers the singleton constructor, loading the license
+                _ = LicenseInfoProvider.Instance;
+
+                _logger.LogInformation("License info loaded successfully.");
                 // Initialize the TCP listener with address reuse enabled.
                 // _tcpListener = new TcpListener(IPAddress.Any, Port);
                 // _tcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);

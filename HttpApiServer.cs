@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text;
 using System.Security.Cryptography;
 using System.IO;
+using System.Collections.Concurrent;
 
 
 namespace MyLanService
@@ -95,6 +96,9 @@ namespace MyLanService
             {
                 return await HandleInactivateSession(context);
             });
+
+
+            app.MapGet("/license/status/all", HandleAllLicenseStatus);
 
 
             app.MapPost("/api/validate-license", async (HttpContext context) =>
@@ -279,7 +283,10 @@ namespace MyLanService
 
         private async Task<IResult> HandleLicenseAssign(HttpContext context)
         {
+
             var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+
+            _logger.LogInformation("License assign request: {Json}", json);
             if (json == null ||
                 !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId) ||
                 !json.TryGetValue("uuid", out var uuid) || string.IsNullOrWhiteSpace(uuid) ||
@@ -290,7 +297,12 @@ namespace MyLanService
                 return Results.BadRequest(new { error = "Missing or invalid license client information." });
             }
 
+            _logger.LogInformation("License assign request: {ClientId}, {UUID}, {MAC}, {Hostname}, {Username}",
+                clientId, uuid, macAddress, hostname, username);
+
             var licenseInfo = LicenseInfoProvider.Instance.GetLicenseInfo();
+
+            _logger.LogInformation("License info: {LicenseInfo}", licenseInfo);
 
             if (licenseInfo == null ||
                 string.IsNullOrWhiteSpace(licenseInfo.LicenseKey) ||
@@ -416,6 +428,36 @@ namespace MyLanService
 
             return Results.BadRequest(new { error = message });
         }
+
+        private async Task<IResult> HandleAllLicenseStatus()
+        {
+            var licenseManager = LicenseStateManager.Instance;
+
+            var sessionsField = typeof(LicenseStateManager)
+                .GetField("_activeLicenses", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+            var activeLicenses = sessionsField.GetValue(licenseManager) as ConcurrentDictionary<string, LicenseSession>;
+
+            var allSessions = activeLicenses!.Values.Select(session => new
+            {
+                session.ClientId,
+                session.UUID,
+                session.Hostname,
+                session.Username,
+                session.MACAddress,
+                AssignedAt = session.AssignedAt.ToString("yyyy-MM-dd HH:mm:ss"),
+                LastHeartbeat = session.LastHeartbeat?.ToString("yyyy-MM-dd HH:mm:ss") ?? "Never",
+                session.Active
+            }).ToList();
+
+            return Results.Ok(new
+            {
+                success = true,
+                count = allSessions.Count,
+                sessions = allSessions
+            });
+        }
+
 
         public async Task StopAsync(CancellationToken cancellationToken)
         {
