@@ -86,6 +86,16 @@ namespace MyLanService
                 return await HandleLicenseRelease(context);
             });
 
+            app.MapPost("/api/license/activate-session", async (HttpContext context) =>
+            {
+                return await HandleActivateSession(context);
+            });
+
+            app.MapPost("/api/license/inactivate-session", async (HttpContext context) =>
+            {
+                return await HandleInactivateSession(context);
+            });
+
 
             app.MapPost("/api/validate-license", async (HttpContext context) =>
             {
@@ -154,7 +164,6 @@ namespace MyLanService
                     {
                         status = "OK",
                         license_key = root.GetProperty("license_key").GetString(),
-                        username = root.GetProperty("username").GetString(),
                         number_of_users = root.GetProperty("number_of_users").GetInt32(),
                         number_of_statements = root.GetProperty("number_of_statements").GetInt32(),
                         expiry_timestamp = expiryTimestamp,
@@ -187,14 +196,13 @@ namespace MyLanService
                     var json = await context.Request.ReadFromJsonAsync<Dictionary<string, object>>();
 
                     // Validate incoming Electron data
-                    if (!json.ContainsKey("licenseKey") || !json.ContainsKey("username") || !json.ContainsKey("uuid_hash"))
+                    if (!json.ContainsKey("licenseKey") || !json.ContainsKey("uuid_hash"))
                         return Results.BadRequest(new { error = "Missing required fields" });
 
                     // Construct Django request payload
                     var djangoPayload = new
                     {
                         license_key = json["licenseKey"],
-                        username = json["username"],
                         uuid_hash = json["uuid_hash"],
                         timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                         is_activated = true // or false based on context
@@ -209,7 +217,7 @@ namespace MyLanService
                     var djangoRequest = new HttpRequestMessage
                     {
                         Method = HttpMethod.Post,
-                        RequestUri = new Uri("http://localhost:8000/api/activate-offline-license/"), // Your Django URL
+                        RequestUri = new Uri("https://152e-103-184-104-244.ngrok-free.app/api/activate-offline-license/"), // Your Django URL
                         Content = requestBody
                     };
 
@@ -272,8 +280,15 @@ namespace MyLanService
         private async Task<IResult> HandleLicenseAssign(HttpContext context)
         {
             var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
-            if (json == null || !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId))
-                return Results.BadRequest(new { error = "Missing or invalid clientId." });
+            if (json == null ||
+                !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId) ||
+                !json.TryGetValue("uuid", out var uuid) || string.IsNullOrWhiteSpace(uuid) ||
+                !json.TryGetValue("macAddress", out var macAddress) || string.IsNullOrWhiteSpace(macAddress) ||
+                !json.TryGetValue("hostname", out var hostname) || string.IsNullOrWhiteSpace(hostname) ||
+                !json.TryGetValue("username", out var username) || string.IsNullOrWhiteSpace(username))
+            {
+                return Results.BadRequest(new { error = "Missing or invalid license client information." });
+            }
 
             var licenseInfo = LicenseInfoProvider.Instance.GetLicenseInfo();
 
@@ -288,43 +303,56 @@ namespace MyLanService
                 );
             }
 
-            var maxUsers = licenseInfo.NumberOfUsers > 0 ? licenseInfo.NumberOfUsers : 1;
-            var _licenseManager = LicenseStateManager.Instance;
+            var licenseManager = LicenseStateManager.Instance;
 
-            _logger.LogInformation("License manager active count: {0}, {0}", _licenseManager.ActiveCount, maxUsers);
+            _logger.LogInformation("License manager active count: {ActiveCount} / {MaxUsers}",
+                licenseManager.ActiveCount, licenseInfo.NumberOfUsers);
 
-            // Check if already assigned or maxed out
-            if (_licenseManager.TryUseLicense(clientId, out var message))
+            if (licenseManager.TryUseLicense(clientId, uuid, macAddress, hostname, username, out var message))
             {
                 return Results.Ok(new
                 {
                     success = true,
                     clientId,
                     message,
-                    activeCount = _licenseManager.ActiveCount,
-                    maxUsers
+                    activeCount = licenseManager.ActiveCount,
+                    maxUsers = licenseInfo.NumberOfUsers
                 });
             }
 
-            return Results.Json(new { error = message, activeCount = _licenseManager.ActiveCount, maxUsers }, statusCode: StatusCodes.Status429TooManyRequests);
+            return Results.Json(new
+            {
+                success = false,
+                error = message,
+                activeCount = licenseManager.ActiveCount,
+                maxUsers = licenseInfo.NumberOfUsers
+            }, statusCode: StatusCodes.Status429TooManyRequests);
         }
+
 
         private async Task<IResult> HandleLicenseRelease(HttpContext context)
         {
             var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
-            if (json == null || !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId))
-                return Results.BadRequest(new { error = "Missing or invalid clientId." });
+            if (json == null ||
+                !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId) ||
+                !json.TryGetValue("uuid", out var uuid) || string.IsNullOrWhiteSpace(uuid) ||
+                !json.TryGetValue("hostname", out var hostname) || string.IsNullOrWhiteSpace(hostname) ||
+                !json.TryGetValue("macAddress", out var macAddress) || string.IsNullOrWhiteSpace(macAddress))
 
-            var _licenseManager = LicenseStateManager.Instance;
+            {
+                return Results.BadRequest(new { error = "Missing or invalid release parameters." });
+            }
 
-            if (_licenseManager.ReleaseLicense(clientId, out var message))
+            var licenseManager = LicenseStateManager.Instance;
+
+            if (licenseManager.ReleaseLicense(clientId, uuid, macAddress, hostname, out var message))
             {
                 return Results.Ok(new
                 {
                     success = true,
                     clientId,
                     message,
-                    activeCount = _licenseManager.ActiveCount
+                    activeCount = licenseManager.ActiveCount
                 });
             }
 
@@ -332,6 +360,62 @@ namespace MyLanService
         }
 
 
+        private async Task<IResult> HandleActivateSession(HttpContext context)
+        {
+            var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+            if (json == null ||
+                !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId) ||
+                !json.TryGetValue("uuid", out var uuid) || string.IsNullOrWhiteSpace(uuid) ||
+                !json.TryGetValue("macAddress", out var macAddress) || string.IsNullOrWhiteSpace(macAddress) ||
+                !json.TryGetValue("hostname", out var hostname) || string.IsNullOrWhiteSpace(hostname))
+            {
+                return Results.BadRequest(new { error = "Missing or invalid activation parameters." });
+            }
+
+            var licenseManager = LicenseStateManager.Instance;
+
+            if (licenseManager.ActivateSession(clientId, uuid, macAddress, hostname, out var message))
+            {
+                return Results.Ok(new
+                {
+                    success = true,
+                    clientId,
+                    message,
+                    activeCount = licenseManager.ActiveCount
+                });
+            }
+
+            return Results.BadRequest(new { error = message });
+        }
+
+
+        private async Task<IResult> HandleInactivateSession(HttpContext context)
+        {
+            var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+            if (json == null ||
+                !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId) ||
+                !json.TryGetValue("uuid", out var uuid) || string.IsNullOrWhiteSpace(uuid) ||
+                !json.TryGetValue("macAddress", out var macAddress) || string.IsNullOrWhiteSpace(macAddress) ||
+                !json.TryGetValue("hostname", out var hostname) || string.IsNullOrWhiteSpace(hostname))
+            {
+                return Results.BadRequest(new { error = "Missing or invalid inactivation parameters." });
+            }
+
+            var licenseManager = LicenseStateManager.Instance;
+
+            if (licenseManager.InactivateSession(clientId, uuid, macAddress, hostname, out var message))
+            {
+                return Results.Ok(new
+                {
+                    success = true,
+                    clientId,
+                    message,
+                    activeCount = licenseManager.ActiveCount
+                });
+            }
+
+            return Results.BadRequest(new { error = message });
+        }
 
         public async Task StopAsync(CancellationToken cancellationToken)
         {
