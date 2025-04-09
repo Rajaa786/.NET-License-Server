@@ -53,25 +53,30 @@ namespace MyLanService
         }
 
 
-        public bool TryUseLicense(string clientId, string uuid, string macAddress, string hostname, string username, out string message)
+        public bool TryUseLicense(string clientId, string uuid, string macAddress, string hostname, string username, out string message, out LicenseSession? session)
         {
             var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
 
             lock (_lock)
             {
-                if (_activeLicenses.ContainsKey(sessionKey))
+                if (_activeLicenses.TryGetValue(sessionKey, out var existingSession))
                 {
                     message = "License already assigned to this client.";
+                    session = existingSession;
                     return true;
                 }
 
+
+                // ❌ No available licenses
                 if (_activeLicenses.Count >= _maxLicenses)
                 {
                     message = "No available licenses.";
+                    session = null; // ✅ Avoid leaking previous reference
                     return false;
                 }
 
-                var session = new LicenseSession
+
+                session = new LicenseSession
                 {
                     ClientId = clientId,
                     UUID = uuid,

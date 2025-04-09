@@ -320,13 +320,16 @@ namespace MyLanService
             _logger.LogInformation("License manager active count: {ActiveCount} / {MaxUsers}",
                 licenseManager.ActiveCount, licenseInfo.NumberOfUsers);
 
-            if (licenseManager.TryUseLicense(clientId, uuid, macAddress, hostname, username, out var message))
+            if (licenseManager.TryUseLicense(clientId, uuid, macAddress, hostname, username, out var message, out var session))
             {
                 return Results.Ok(new
                 {
                     success = true,
                     clientId,
                     message,
+                    licenseExpiry = licenseInfo.ExpiryTimestamp,
+                    assignedAt = session!.AssignedAt,
+                    lastHeartbeat = session!.LastHeartbeat,
                     activeCount = licenseManager.ActiveCount,
                     maxUsers = licenseInfo.NumberOfUsers
                 });
