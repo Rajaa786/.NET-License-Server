@@ -25,6 +25,8 @@ namespace MyLanService
         [JsonPropertyName("number_of_statements")]
         public int NumberOfStatements { get; set; }
 
+        public int UsedStatements { get; set; }
+
         public override string ToString() => JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
 
     }

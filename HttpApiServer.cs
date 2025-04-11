@@ -100,6 +100,66 @@ namespace MyLanService
 
             app.MapGet("/license/status/all", HandleAllLicenseStatus);
 
+            // Endpoint to record the usage of one license statement
+            app.MapPost("/api/license/use-statement", async (HttpContext context) =>
+            {
+                var success = LicenseStateManager.Instance.TryUseStatement(out var msg);
+                var responseData = new
+                {
+                    success,
+                    message = msg,
+                    remaining = LicenseStateManager.Instance.RemainingStatements
+                };
+
+                return Results.Ok(responseData);
+            });
+
+            // Endpoint to check if the statement limit has been reached
+            app.MapGet("/api/license/check-statement-limit", async (HttpContext context) =>
+            {
+                var limitReached = LicenseStateManager.Instance.IsStatementLimitReached();
+                var responseData = new
+                {
+                    limitReached,
+                    remaining = LicenseStateManager.Instance.RemainingStatements
+                };
+
+                return Results.Ok(responseData);
+
+            });
+
+
+            app.MapPost("/api/license/validate-session", async (HttpContext context) =>
+            {
+                var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+                if (json == null ||
+                    !json.TryGetValue("clientId", out var clientId) || string.IsNullOrWhiteSpace(clientId) ||
+                    !json.TryGetValue("uuid", out var uuid) || string.IsNullOrWhiteSpace(uuid) ||
+                    !json.TryGetValue("hostname", out var hostname) || string.IsNullOrWhiteSpace(hostname) ||
+                    !json.TryGetValue("macAddress", out var macAddress) || string.IsNullOrWhiteSpace(macAddress))
+                {
+                    return Results.BadRequest(new { error = "Missing or invalid validation parameters." });
+                }
+
+                var licenseManager = LicenseStateManager.Instance;
+                var message = "";
+
+                if (licenseManager.IsSessionValid(clientId, uuid, macAddress, hostname))
+                {
+                    message = "Session is valid.";
+                    return Results.Ok(new
+                    {
+                        success = true,
+                        clientId,
+                        message,
+                        activeCount = licenseManager.ActiveCount
+                    });
+                }
+                message = "Session is invalid or expired.";
+                return Results.BadRequest(new { error = message });
+
+            });
+
 
             app.MapPost("/api/validate-license", async (HttpContext context) =>
             {
@@ -193,6 +253,8 @@ namespace MyLanService
                 }
             });
 
+
+
             app.MapPost("/api/activate-license", async (HttpContext context) =>
             {
                 try
@@ -200,7 +262,7 @@ namespace MyLanService
                     var json = await context.Request.ReadFromJsonAsync<Dictionary<string, object>>();
 
                     // Validate incoming Electron data
-                    if (!json.ContainsKey("licenseKey") || !json.ContainsKey("uuid_hash"))
+                    if (!json.ContainsKey("licenseKey") || !json.ContainsKey("uuid_hash") || !json.ContainsKey("role"))
                         return Results.BadRequest(new { error = "Missing required fields" });
 
                     // Construct Django request payload
@@ -221,7 +283,7 @@ namespace MyLanService
                     var djangoRequest = new HttpRequestMessage
                     {
                         Method = HttpMethod.Post,
-                        RequestUri = new Uri("https://152e-103-184-104-244.ngrok-free.app/api/activate-offline-license/"), // Your Django URL
+                        RequestUri = new Uri("http://localhost:8000/api/activate-offline-license/"), // Your Django URL
                         Content = requestBody
                     };
 
@@ -230,9 +292,18 @@ namespace MyLanService
 
                     var response = await _httpClient.SendAsync(djangoRequest);
                     var resultContent = await response.Content.ReadAsStringAsync();
+
                     if (response.IsSuccessStatusCode)
                     {
 
+                        var role = json["role"]?.ToString();
+
+                        // ✅ Parse and enrich Django response with role
+                        var parsedResult = JsonSerializer.Deserialize<Dictionary<string, object>>(resultContent);
+                        parsedResult["role"] = role;
+
+                        // Serialize enriched response
+                        var enrichedJson = JsonSerializer.Serialize(parsedResult);
 
                         // ✅ Save encrypted license securely
                         var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
@@ -241,7 +312,7 @@ namespace MyLanService
                             : AppContext.BaseDirectory;
 
                         string licenseFilePath = Path.Combine(baseDir, "license.enc");
-                        byte[] plainBytes = Encoding.UTF8.GetBytes(resultContent);
+                        byte[] plainBytes = Encoding.UTF8.GetBytes(enrichedJson);
 
                         // 🔐 Generate encryption key from machine-locked fingerprint (not stored anywhere)
                         string fingerprint = Environment.MachineName + Environment.UserName;
@@ -265,7 +336,7 @@ namespace MyLanService
                         await File.WriteAllBytesAsync(licenseFilePath, encryptedBytes);
                         _logger.LogInformation("License information securely saved at {0}", licenseFilePath);
 
-                        return Results.Ok(JsonDocument.Parse(resultContent).RootElement);
+                        return Results.Ok(JsonDocument.Parse(enrichedJson).RootElement);
                     }
                     _logger.LogError("Django API returned error: {0}", resultContent);
 
