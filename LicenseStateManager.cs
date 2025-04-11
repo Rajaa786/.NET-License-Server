@@ -209,6 +209,25 @@ namespace MyLanService
             }
         }
 
+
+        public IEnumerable<object> GetInactiveLicensesWithKey()
+        {
+            lock (_lock)
+            {
+                // Return an anonymous object containing the session key and the license session data 
+                return _activeLicenses
+                    .Where(kvp => !kvp.Value.Active)
+                    .Select(kvp => new
+                    {
+                        sessionKey = kvp.Key,
+                        sessionDetails = kvp.Value
+                    })
+                    .ToList();
+            }
+        }
+
+
+
         public int ActiveCount => _activeLicenses.Count;
         public string[] ActiveClients => _activeLicenses.Keys.ToArray();
 

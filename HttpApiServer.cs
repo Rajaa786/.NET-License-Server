@@ -166,9 +166,18 @@ namespace MyLanService
                 try
                 {
                     var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                    string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
-                        ? Directory.GetCurrentDirectory()
-                        : AppContext.BaseDirectory;
+                    string appFolder = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                        ? "CyphersolDev"    // Use a development-specific folder name
+                        : "Cyphersol";  // Use the production folder name
+
+                    string baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), appFolder);
+
+
+                    // Ensure the target directory exists in production
+                    if (!Directory.Exists(baseDir))
+                    {
+                        Directory.CreateDirectory(baseDir);
+                    }
 
                     string licenseFilePath = Path.Combine(baseDir, "license.enc");
                     if (!File.Exists(licenseFilePath))
@@ -306,10 +315,20 @@ namespace MyLanService
                         var enrichedJson = JsonSerializer.Serialize(parsedResult);
 
                         // ✅ Save encrypted license securely
+                        // ✅ Determine the base directory based on the environment
                         var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                        string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
-                            ? Directory.GetCurrentDirectory()
-                            : AppContext.BaseDirectory;
+                        string appFolder = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                            ? "CyphersolDev"    // Use a development-specific folder name
+                            : "Cyphersol";  // Use the production folder name
+
+                        string baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), appFolder);
+
+
+                        // Ensure the target directory exists in production
+                        if (!Directory.Exists(baseDir))
+                        {
+                            Directory.CreateDirectory(baseDir);
+                        }
 
                         string licenseFilePath = Path.Combine(baseDir, "license.enc");
                         byte[] plainBytes = Encoding.UTF8.GetBytes(enrichedJson);
@@ -405,14 +424,20 @@ namespace MyLanService
                     maxUsers = licenseInfo.NumberOfUsers
                 });
             }
-
-            return Results.Json(new
+            else
             {
-                success = false,
-                error = message,
-                activeCount = licenseManager.ActiveCount,
-                maxUsers = licenseInfo.NumberOfUsers
-            }, statusCode: StatusCodes.Status429TooManyRequests);
+                // If all licenses are full and no new license could be assigned,
+                // return the list of inactive licenses (Active == false)
+                var inactiveLicenses = licenseManager.GetInactiveLicensesWithKey();
+                return Results.Json(new
+                {
+                    success = false,
+                    error = message,
+                    inactiveLicenses,
+                    activeCount = licenseManager.ActiveCount,
+                    maxUsers = licenseInfo.NumberOfUsers
+                }, statusCode: StatusCodes.Status429TooManyRequests);
+            }
         }
 
 

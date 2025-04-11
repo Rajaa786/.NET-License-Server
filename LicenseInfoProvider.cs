@@ -51,9 +51,19 @@ namespace MyLanService
             try
             {
                 var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
-                    ? Directory.GetCurrentDirectory()
-                    : AppContext.BaseDirectory;
+                string appFolder = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                    ? "CyphersolDev"    // Use a development-specific folder name
+                    : "Cyphersol";  // Use the production folder name
+
+                string baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), appFolder);
+
+
+                // Ensure the target directory exists in production
+                if (!Directory.Exists(baseDir))
+                {
+                    Directory.CreateDirectory(baseDir);
+                }
+
                 string licenseFilePath = Path.Combine(baseDir, "license.enc");
 
                 if (!File.Exists(licenseFilePath))

@@ -33,6 +33,12 @@ namespace MyLanService
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+
+            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            _logger.LogInformation($"Environment ASPNETCORE_ENVIRONMENT: {env}");
+            // string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
+            //     ? Directory.GetCurrentDirectory()
+            //     : AppContext.BaseDirectory;
             _logger.LogInformation("TCP Server starting...");
 
             try
@@ -57,11 +63,16 @@ namespace MyLanService
                 // _logger.LogInformation($"TCP Server started on port {Port}");
 
                 // Initialize mDNS components.
+                // _mdns = new MulticastService();
+
+                var localIP = GetLocalIPAddress();
+
+                // Use the constructor with a filter to select only the matching NIC
                 _mdns = new MulticastService();
 
                 foreach (var a in MulticastService.GetIPAddresses())
                 {
-                    Console.WriteLine($"IP address {a}");
+                    Console.WriteLine($"Got MDNS IP address {a}");
                 }
 
                 // _mdns.QueryReceived += (s, e) =>
@@ -79,20 +90,22 @@ namespace MyLanService
                 //     Console.WriteLine($"got answer for {String.Join(", ", names)}");
                 // };
 
-                // _mdns.NetworkInterfaceDiscovered += (s, e) =>
-                // {
-                //     foreach (var nic in e.NetworkInterfaces)
-                //     {
-                //         Console.WriteLine($"discovered NIC '{nic.Name}'");
-                //     }
-                // };
+                _mdns.NetworkInterfaceDiscovered += (s, e) =>
+                {
+                    foreach (var nic in e.NetworkInterfaces)
+                    {
+                        Console.WriteLine($"discovered NIC '{nic.Name}'");
+                    }
+                };
 
 
                 _serviceDiscovery = new ServiceDiscovery(_mdns);
 
                 // Get system hostname and local network IP address.
                 string systemHostname = Dns.GetHostName();
-                IPAddress localIP = GetLocalIPAddress();
+                // IPAddress localIP = GetLocalIPAddress();
+
+                _logger.LogInformation($"IP address: {localIP}");
 
                 // Create a service profile with your hostname and port.
                 var serviceProfile = new ServiceProfile(
@@ -136,18 +149,38 @@ namespace MyLanService
                 if (ni.OperationalStatus != OperationalStatus.Up)
                     continue;
 
+                // Filter out unwanted interface types
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                    ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel ||
+                    ni.Description.ToLower().Contains("virtual") ||
+                    ni.Description.ToLower().Contains("vpn") ||
+                    ni.Name.ToLower().Contains("virtual") ||
+                    ni.Name.ToLower().Contains("vpn"))
+                {
+                    continue;
+                }
+
+
                 var ipProps = ni.GetIPProperties();
+
+                // Check if it has a default gateway — sign of active network
+                if (ipProps.GatewayAddresses.Count == 0)
+                    continue;
+
                 foreach (var ua in ipProps.UnicastAddresses)
                 {
                     if (ua.Address.AddressFamily == AddressFamily.InterNetwork &&
                         !IPAddress.IsLoopback(ua.Address))
                     {
+                        _logger.LogInformation($"Found active network interface: {ni.Name} with IP: {ua.Address}");
                         return ua.Address;
                     }
                 }
             }
-            throw new Exception("No network adapters with an IPv4 address in the system!");
+
+            throw new Exception("No suitable active network interface with an IPv4 address found.");
         }
+
 
         // private async Task HandleClient(TcpClient client)
         // {
