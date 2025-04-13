@@ -1,7 +1,8 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Security.Cryptography;
 using System.Text.Json.Serialization;
+using MyLanService.Utils;
 
 namespace MyLanService
 {
@@ -25,79 +26,86 @@ namespace MyLanService
         [JsonPropertyName("number_of_statements")]
         public int NumberOfStatements { get; set; }
 
+        [JsonPropertyName("role")]
+        public string Role { get; set; }
+
         public int UsedStatements { get; set; }
 
-        public override string ToString() => JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        public bool IsValid()
+        {
+            return !string.IsNullOrWhiteSpace(LicenseKey)
+                && CurrentTimestamp > 0
+                && ExpiryTimestamp > CurrentTimestamp
+                && NumberOfUsers > 0
+                && NumberOfStatements != 0;
+        }
 
+        public override string ToString() =>
+            JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
     }
 
     public sealed class LicenseInfoProvider
     {
-        private static readonly Lazy<LicenseInfoProvider> _instance = new(() => new LicenseInfoProvider());
-        public static LicenseInfoProvider Instance => _instance.Value;
+        private readonly ILogger<LicenseInfoProvider> _logger;
 
-        private LicenseInfo _licenseInfo;
+        private readonly LicenseInfo _licenseInfo;
+        private readonly LicenseHelper _licenseHelper;
 
-        private LicenseInfoProvider()
+        // Constructor with ILogger and LicenseInfo to inject logging and license data into LicenseInfoProvider
+        public LicenseInfoProvider(ILogger<LicenseInfoProvider> logger, LicenseHelper licenseHelper)
         {
+            _logger = logger;
+            // _licenseInfo = licenseInfo ?? throw new ArgumentNullException(nameof(licenseInfo)); // Ensure LicenseInfo is not null
+            _licenseHelper = licenseHelper;
+
             _licenseInfo = LoadLicenseInfo();
-            Console.WriteLine($"LicenseInfoProvider initialized: {_licenseInfo}");
+            _logger.LogInformation(
+                $"LicenseInfoProvider initialized with LicenseKey: {_licenseInfo.ToString()}"
+            );
+            _logger.LogInformation("LicenseInfoProvider initialized.");
         }
 
         public LicenseInfo GetLicenseInfo() => _licenseInfo;
+
+        public void SetLicenseInfo(LicenseInfo licenseInfo) => _licenseInfo = licenseInfo;
 
         private LicenseInfo LoadLicenseInfo()
         {
             try
             {
                 var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                string appFolder = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
-                    ? "CyphersolDev"    // Use a development-specific folder name
-                    : "Cyphersol";  // Use the production folder name
+                string appFolder =
+                    (
+                        !string.IsNullOrWhiteSpace(env)
+                        && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                    )
+                        ? "CyphersolDev" // Use a development-specific folder name
+                        : "Cyphersol"; // Use the production folder name
 
-                string baseDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), appFolder);
+                var licenseFilePath = _licenseHelper.GetLicenseFilePath(appFolder);
 
-
-                // Ensure the target directory exists in production
-                if (!Directory.Exists(baseDir))
+                byte[] encryptedBytes = null;
+                try
                 {
-                    Directory.CreateDirectory(baseDir);
+                    encryptedBytes = _licenseHelper.ReadBytesSync(licenseFilePath);
+                    _logger.LogInformation(
+                        $"Successfully read encrypted license from {licenseFilePath} {encryptedBytes.Length} bytes"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error reading encrypted license file: {ex.Message}", ex);
+                    throw new Exception();
                 }
 
-                string licenseFilePath = Path.Combine(baseDir, "license.enc");
-
-                if (!File.Exists(licenseFilePath))
-                {
-                    Console.WriteLine($"License file not found at {licenseFilePath}");
-                    return new LicenseInfo(); // fallback
-                }
-                Console.WriteLine($"License file found at {licenseFilePath}");
-
-                byte[] encryptedBytes = File.ReadAllBytes(licenseFilePath);
-                string fingerprint = Environment.MachineName + Environment.UserName;
-
-                using var deriveBytes = new Rfc2898DeriveBytes(fingerprint, Encoding.UTF8.GetBytes("YourSuperSalt!@#"), 100_000, HashAlgorithmName.SHA256);
-                byte[] aesKey = deriveBytes.GetBytes(32);
-                byte[] aesIV = deriveBytes.GetBytes(16);
-
-                using var aes = Aes.Create();
-                aes.Key = aesKey;
-                aes.IV = aesIV;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
-
-                using var decryptor = aes.CreateDecryptor();
-                byte[] decryptedBytes = decryptor.TransformFinalBlock(encryptedBytes, 0, encryptedBytes.Length);
-
-                string json = Encoding.UTF8.GetString(decryptedBytes);
-
-                return JsonSerializer.Deserialize<LicenseInfo>(json) ?? new LicenseInfo();
+                string? decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
+                return JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogError($"Error loading license info: {ex.Message}", ex);
                 return new LicenseInfo(); // fallback on error
             }
         }
-
     }
 }

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Linq;
 using System.Text.Json;
-
+using MyLanService.Utils;
 
 namespace MyLanService
 {
@@ -17,41 +17,49 @@ namespace MyLanService
         public string MACAddress { get; set; }
         public DateTime AssignedAt { get; set; }
         public DateTime? LastHeartbeat { get; set; }
-        public bool Active { get; set; } = true;
+        public bool Active { get; set; } = false;
     }
 
-    public sealed class LicenseStateManager
+    public class LicenseStateManager
     {
-        private static readonly Lazy<LicenseStateManager> _instance = new(() =>
-        {
-            var licenseInfo = LicenseInfoProvider.Instance.GetLicenseInfo();
-            int maxUsers = licenseInfo?.NumberOfUsers > 0 ? licenseInfo.NumberOfUsers : 5;
-            return new LicenseStateManager(licenseInfo, maxUsers);
-        });
-
-        public static LicenseStateManager Instance => _instance.Value;
-
         private readonly int _maxLicenses;
         private readonly ConcurrentDictionary<string, LicenseSession> _activeLicenses;
         private readonly object _lock = new();
+        private readonly ILogger<LicenseStateManager> _logger;
 
         // License usage tracking:
         // LicenseInfo.NumberOfStatements represents the allowed maximum.
         // _currentUsedStatements tracks the statements used (loaded from LicenseInfo.UsedStatements on startup).
         private readonly LicenseInfo _licenseInfo;
         private int _currentUsedStatements;
+
         // Flush disk writes every 10 seconds (adjust as needed)
         private DateTime _lastFlush = DateTime.UtcNow;
         private readonly TimeSpan _flushInterval = TimeSpan.FromSeconds(10);
+        private readonly LicenseHelper _licenseHelper;
 
-
-        private LicenseStateManager(LicenseInfo licenseInfo, int maxLicenses)
+        public LicenseStateManager(
+            LicenseInfoProvider licenseInfoProvider,
+            ILogger<LicenseStateManager> logger,
+            LicenseHelper licenseHelper
+        )
         {
-            _maxLicenses = maxLicenses;
-            _currentUsedStatements = (licenseInfo?.UsedStatements ?? 0);
+            _logger = logger;
+            _licenseHelper = licenseHelper;
+            _licenseInfo = licenseInfoProvider.GetLicenseInfo();
+            _logger.LogInformation(
+                $"[LicenseStateManager] License info loaded: {_licenseInfo.ToString()}"
+            );
+            _maxLicenses = _licenseInfo?.NumberOfUsers > 0 ? _licenseInfo.NumberOfUsers : 5;
+            _currentUsedStatements = _licenseInfo?.UsedStatements ?? 0;
+            _logger.LogInformation(
+                $"[LicenseStateManager] Max licenses: {_maxLicenses}, Current used statements: {_currentUsedStatements}"
+            );
 
             _activeLicenses = new ConcurrentDictionary<string, LicenseSession>();
         }
+
+        private bool IsUnlimitedStatements => _licenseInfo?.NumberOfStatements == -1;
 
         /// <summary>
         /// Calculates the remaining statements allowed.
@@ -65,6 +73,10 @@ namespace MyLanService
                     if (_licenseInfo == null)
                     {
                         return 0;
+                    }
+                    if (IsUnlimitedStatements)
+                    {
+                        return int.MaxValue; // Unlimited
                     }
                     return _licenseInfo.NumberOfStatements - _currentUsedStatements;
                 }
@@ -82,13 +94,13 @@ namespace MyLanService
             }
         }
 
-
         private string GenerateSessionKey(string uuid, string hostname, string windowsUserSID)
         {
             using var sha256 = SHA256.Create();
 
             // Normalize and combine input components
-            var rawData = $"{uuid?.Trim().ToLowerInvariant()}::{hostname?.Trim().ToLowerInvariant()}::{windowsUserSID?.Trim().ToLowerInvariant()}";
+            var rawData =
+                $"{uuid?.Trim().ToLowerInvariant()}::{hostname?.Trim().ToLowerInvariant()}::{windowsUserSID?.Trim().ToLowerInvariant()}";
 
             // Generate SHA-256 hash and convert to a readable hex string
             var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(rawData));
@@ -97,8 +109,15 @@ namespace MyLanService
             return sessionKey;
         }
 
-
-        public bool TryUseLicense(string clientId, string uuid, string macAddress, string hostname, string username, out string message, out LicenseSession? session)
+        public bool TryUseLicense(
+            string clientId,
+            string uuid,
+            string macAddress,
+            string hostname,
+            string username,
+            out string message,
+            out LicenseSession? session
+        )
         {
             var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
 
@@ -111,7 +130,6 @@ namespace MyLanService
                     return true;
                 }
 
-
                 // ❌ No available licenses
                 if (_activeLicenses.Count >= _maxLicenses)
                 {
@@ -119,7 +137,6 @@ namespace MyLanService
                     session = null; // ✅ Avoid leaking previous reference
                     return false;
                 }
-
 
                 session = new LicenseSession
                 {
@@ -130,7 +147,7 @@ namespace MyLanService
                     Username = username,
                     AssignedAt = DateTime.UtcNow,
                     LastHeartbeat = DateTime.UtcNow,
-                    Active = true
+                    Active = false,
                 };
 
                 _activeLicenses[sessionKey] = session;
@@ -139,7 +156,13 @@ namespace MyLanService
             }
         }
 
-        public bool ReleaseLicense(string clientId, string uuid, string macAddress, string hostname, out string message)
+        public bool ReleaseLicense(
+            string clientId,
+            string uuid,
+            string macAddress,
+            string hostname,
+            out string message
+        )
         {
             var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
 
@@ -156,7 +179,6 @@ namespace MyLanService
             }
         }
 
-
         public bool IsSessionValid(string clientId, string uuid, string macAddress, string hostname)
         {
             var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
@@ -172,7 +194,13 @@ namespace MyLanService
             }
         }
 
-        public bool ActivateSession(string clientId, string uuid, string macAddress, string hostname, out string message)
+        public bool ActivateSession(
+            string clientId,
+            string uuid,
+            string macAddress,
+            string hostname,
+            out string message
+        )
         {
             var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
 
@@ -191,7 +219,13 @@ namespace MyLanService
             }
         }
 
-        public bool InactivateSession(string clientId, string uuid, string macAddress, string hostname, out string message)
+        public bool InactivateSession(
+            string clientId,
+            string uuid,
+            string macAddress,
+            string hostname,
+            out string message
+        )
         {
             var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
 
@@ -209,24 +243,48 @@ namespace MyLanService
             }
         }
 
+        public bool RevokeInactiveSession(string sessionKey, out string message)
+        {
+            // Generate the session key using your existing method.
+            // var sessionKey = GenerateSessionKey(uuid, hostname, clientId);
+
+            lock (_lock)
+            {
+                // Check if the session exists.
+                if (_activeLicenses.TryGetValue(sessionKey, out var session))
+                {
+                    // Only allow revoking if the session is inactive.
+                    if (!session.Active)
+                    {
+                        _activeLicenses.TryRemove(sessionKey, out _);
+                        message = "Inactive session revoked successfully.";
+                        return true;
+                    }
+                    else
+                    {
+                        message = "Session is active and cannot be revoked.";
+                        return false;
+                    }
+                }
+                else
+                {
+                    message = "Session not found.";
+                    return false;
+                }
+            }
+        }
 
         public IEnumerable<object> GetInactiveLicensesWithKey()
         {
             lock (_lock)
             {
-                // Return an anonymous object containing the session key and the license session data 
+                // Return an anonymous object containing the session key and the license session data
                 return _activeLicenses
                     .Where(kvp => !kvp.Value.Active)
-                    .Select(kvp => new
-                    {
-                        sessionKey = kvp.Key,
-                        sessionDetails = kvp.Value
-                    })
+                    .Select(kvp => new { sessionKey = kvp.Key, sessionDetails = kvp.Value })
                     .ToList();
             }
         }
-
-
 
         public int ActiveCount => _activeLicenses.Count;
         public string[] ActiveClients => _activeLicenses.Keys.ToArray();
@@ -243,7 +301,6 @@ namespace MyLanService
             }
         }
 
-
         /// <summary>
         /// Attempts to record the usage of one statement.
         /// First checks if the current usage is less than the allowed limit by verifying RemainingStatements.
@@ -254,15 +311,12 @@ namespace MyLanService
         {
             lock (_lock)
             {
-                if (_currentUsedStatements >= _licenseInfo.NumberOfStatements)
+                if (
+                    !IsUnlimitedStatements
+                    && _currentUsedStatements >= _licenseInfo.NumberOfStatements
+                )
                 {
                     message = "Statement limit reached.";
-                    return false;
-                }
-                // Check against remaining statements (calculated on the fly)
-                if ((_licenseInfo.NumberOfStatements - _currentUsedStatements) <= 0)
-                {
-                    message = "No remaining statements available.";
                     return false;
                 }
 
@@ -271,7 +325,16 @@ namespace MyLanService
 
                 if (DateTime.UtcNow - _lastFlush >= _flushInterval)
                 {
+                    _logger.LogInformation(
+                        $"[TryUseStatement] Flushing {_currentUsedStatements} used statements to disk., last flush was at {_lastFlush}, difference: {DateTime.UtcNow - _lastFlush}"
+                    );
                     FlushToDisk();
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        $"[TryUseStatement] Not flushing yet. Last flush was at {_lastFlush}, difference: {DateTime.UtcNow - _lastFlush}"
+                    );
                 }
                 return true;
             }
@@ -289,6 +352,12 @@ namespace MyLanService
                     Console.WriteLine("[IsStatementLimitReached] License info is not available.");
                     return true; // Fail safe: assume limit is reached
                 }
+
+                if (IsUnlimitedStatements)
+                {
+                    return false; // Never limited
+                }
+
                 return _currentUsedStatements >= _licenseInfo.NumberOfStatements;
             }
         }
@@ -302,38 +371,69 @@ namespace MyLanService
         {
             try
             {
-                if (_licenseInfo == null)
+                if (_licenseInfo == null || !_licenseInfo.IsValid())
                 {
-                    Console.WriteLine("[FlushToDisk] License info is null. Skipping flush.");
+                    _logger.LogWarning("[FlushToDisk] License info is null. Skipping flush.");
                     return;
                 }
 
+                _logger.LogInformation(
+                    $"[FlushToDisk] Flushing {_currentUsedStatements} used statements to disk."
+                );
+
                 _licenseInfo.UsedStatements = _currentUsedStatements;
 
-                string fingerprint = Environment.MachineName + Environment.UserName;
-                using var deriveBytes = new Rfc2898DeriveBytes(fingerprint, Encoding.UTF8.GetBytes("YourSuperSalt!@#"), 100_000, HashAlgorithmName.SHA256);
-                byte[] aesKey = deriveBytes.GetBytes(32);
-                byte[] aesIV = deriveBytes.GetBytes(16);
+                var enrichedJson = JsonSerializer.Serialize(_licenseInfo);
 
-                var json = JsonSerializer.Serialize(_licenseInfo);
-                var plainBytes = Encoding.UTF8.GetBytes(json);
+                _logger.LogInformation($"[FlushToDisk] Enriched JSON: {enrichedJson}");
 
-                using var aes = Aes.Create();
-                aes.Key = aesKey;
-                aes.IV = aesIV;
-                aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.PKCS7;
+                var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                string appFolder =
+                    (
+                        !string.IsNullOrWhiteSpace(env)
+                        && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                    )
+                        ? "CyphersolDev" // Use a development-specific folder name
+                        : "Cyphersol"; // Use the production folder name
 
-                using var encryptor = aes.CreateEncryptor();
-                var encryptedBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+                var licenseFilePath = _licenseHelper.GetLicenseFilePath(appFolder);
 
-                var path = Path.Combine(AppContext.BaseDirectory, "license.enc");
-                File.WriteAllBytes(path, encryptedBytes);
+                byte[] encryptedBytes = null;
+
+                try
+                {
+                    encryptedBytes = _licenseHelper.GetEncryptedBytes(enrichedJson);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        $"Unexpected error while getting encrypted bytes: {ex.Message}",
+                        ex
+                    );
+
+                    throw new Exception("Something went wrong");
+                }
+
+                // Save the encrypted bytes to a file
+                try
+                {
+                    _licenseHelper.WriteBytesSync(licenseFilePath, encryptedBytes);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Error saving encrypted license file: {ex.Message}", ex);
+                    throw new Exception("Something went wrong");
+                }
+                _logger.LogInformation(
+                    "License information securely saved at {0}",
+                    licenseFilePath
+                );
+
                 _lastFlush = DateTime.UtcNow;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[FlushToDisk] Failed to write license file: {ex}");
+                _logger.LogError($"[FlushToDisk] Failed to write license file: {ex}");
             }
         }
 

@@ -1,6 +1,3 @@
-using Makaretu.Dns;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -9,12 +6,17 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Makaretu.Dns;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using MyLanService.Utils;
 
 namespace MyLanService
 {
     public class Worker : BackgroundService
     {
         private readonly ILogger<Worker> _logger;
+
         // private TcpListener _tcpListener;
         private TcpApiServer _tcpApiServer;
 
@@ -22,18 +24,29 @@ namespace MyLanService
         private const int HttpPort = 7890;
         private MulticastService _mdns;
         private ServiceDiscovery _serviceDiscovery;
+        private readonly LicenseHelper _licenseHelper;
+        private readonly LicenseStateManager _licenseStateManager;
+        private readonly LicenseInfoProvider _licenseInfoProvider;
 
         private HttpApiHost _httpApiHost;
 
-
-        public Worker(ILogger<Worker> logger)
+        public Worker(
+            ILogger<Worker> logger,
+            LicenseHelper licenseHelper,
+            LicenseStateManager licenseStateManager,
+            LicenseInfoProvider licenseInfoProvider
+        )
+            : base()
         {
             _logger = logger;
+            _licenseHelper = licenseHelper;
+            _licenseStateManager = licenseStateManager;
+            _licenseInfoProvider = licenseInfoProvider;
+            _logger.LogInformation("Worker initialized.");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-
             var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
             _logger.LogInformation($"Environment ASPNETCORE_ENVIRONMENT: {env}");
             // string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
@@ -43,11 +56,10 @@ namespace MyLanService
 
             try
             {
-
                 // This triggers the singleton constructor, loading the license
-                _ = LicenseInfoProvider.Instance;
+                // _ = LicenseInfoProvider.Instance;
 
-                _logger.LogInformation("License info loaded successfully.");
+                // _logger.LogInformation("License info loaded successfully.");
                 // Initialize the TCP listener with address reuse enabled.
                 // _tcpListener = new TcpListener(IPAddress.Any, Port);
                 // _tcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
@@ -55,7 +67,13 @@ namespace MyLanService
                 _tcpApiServer = new TcpApiServer(TcpPort, _logger);
                 var tcpTask = _tcpApiServer.StartAsync(stoppingToken);
 
-                _httpApiHost = new HttpApiHost(HttpPort, _logger);
+                _httpApiHost = new HttpApiHost(
+                    HttpPort,
+                    _logger,
+                    _licenseStateManager,
+                    _licenseInfoProvider,
+                    _licenseHelper
+                );
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
 
                 _logger.LogInformation("HTTP API Server started on port 7890");
@@ -98,7 +116,6 @@ namespace MyLanService
                     }
                 };
 
-
                 _serviceDiscovery = new ServiceDiscovery(_mdns);
 
                 // Get system hostname and local network IP address.
@@ -109,8 +126,8 @@ namespace MyLanService
 
                 // Create a service profile with your hostname and port.
                 var serviceProfile = new ServiceProfile(
-                    instanceName: systemHostname,  // Friendly name for your service
-                    serviceName: "_license-server._tcp",         // Service type (without .local)
+                    instanceName: systemHostname, // Friendly name for your service
+                    serviceName: "_license-server._tcp", // Service type (without .local)
                     port: HttpPort
                 );
 
@@ -122,11 +139,12 @@ namespace MyLanService
                 // Advertise the service via mDNS.
                 _serviceDiscovery.Advertise(serviceProfile);
                 _mdns.Start();
-                _logger.LogInformation($"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}");
+                _logger.LogInformation(
+                    $"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}"
+                );
 
                 // Wait for TCP server to complete (usually runs until cancellation)
                 await Task.WhenAll(tcpTask, httpTask);
-
             }
             catch (Exception ex)
             {
@@ -150,16 +168,17 @@ namespace MyLanService
                     continue;
 
                 // Filter out unwanted interface types
-                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
-                    ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel ||
-                    ni.Description.ToLower().Contains("virtual") ||
-                    ni.Description.ToLower().Contains("vpn") ||
-                    ni.Name.ToLower().Contains("virtual") ||
-                    ni.Name.ToLower().Contains("vpn"))
+                if (
+                    ni.NetworkInterfaceType == NetworkInterfaceType.Loopback
+                    || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel
+                    || ni.Description.ToLower().Contains("virtual")
+                    || ni.Description.ToLower().Contains("vpn")
+                    || ni.Name.ToLower().Contains("virtual")
+                    || ni.Name.ToLower().Contains("vpn")
+                )
                 {
                     continue;
                 }
-
 
                 var ipProps = ni.GetIPProperties();
 
@@ -169,10 +188,14 @@ namespace MyLanService
 
                 foreach (var ua in ipProps.UnicastAddresses)
                 {
-                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork &&
-                        !IPAddress.IsLoopback(ua.Address))
+                    if (
+                        ua.Address.AddressFamily == AddressFamily.InterNetwork
+                        && !IPAddress.IsLoopback(ua.Address)
+                    )
                     {
-                        _logger.LogInformation($"Found active network interface: {ni.Name} with IP: {ua.Address}");
+                        _logger.LogInformation(
+                            $"Found active network interface: {ni.Name} with IP: {ua.Address}"
+                        );
                         return ua.Address;
                     }
                 }
@@ -180,7 +203,6 @@ namespace MyLanService
 
             throw new Exception("No suitable active network interface with an IPv4 address found.");
         }
-
 
         // private async Task HandleClient(TcpClient client)
         // {
@@ -215,6 +237,7 @@ namespace MyLanService
                     _mdns.Stop();
                     _mdns.Dispose();
                 }
+                _licenseStateManager?.Flush();
             }
             catch (Exception ex)
             {
@@ -225,7 +248,5 @@ namespace MyLanService
                 await base.StopAsync(cancellationToken);
             }
         }
-
-
     }
 }
