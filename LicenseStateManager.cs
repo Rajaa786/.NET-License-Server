@@ -22,7 +22,7 @@ namespace MyLanService
 
     public class LicenseStateManager
     {
-        private readonly int _maxLicenses;
+        public int _maxLicenses;
         private readonly ConcurrentDictionary<string, LicenseSession> _activeLicenses;
         private readonly object _lock = new();
         private readonly ILogger<LicenseStateManager> _logger;
@@ -30,8 +30,8 @@ namespace MyLanService
         // License usage tracking:
         // LicenseInfo.NumberOfStatements represents the allowed maximum.
         // _currentUsedStatements tracks the statements used (loaded from LicenseInfo.UsedStatements on startup).
-        private readonly LicenseInfo _licenseInfo;
-        private int _currentUsedStatements;
+        public LicenseInfo _licenseInfo;
+        public int _currentUsedStatements;
 
         // Flush disk writes every 10 seconds (adjust as needed)
         private DateTime _lastFlush = DateTime.UtcNow;
@@ -233,10 +233,16 @@ namespace MyLanService
             {
                 if (_activeLicenses.TryGetValue(sessionKey, out var session))
                 {
+                    _logger.LogInformation(
+                        $"[InactivateSession] Found session for clientId: {clientId}, uuid: {uuid}, macAddress: {macAddress}, hostname: {hostname}"
+                    );
                     session.Active = false;
                     message = "Session marked as inactive.";
                     return true;
                 }
+                _logger.LogInformation(
+                    $"[InactivateSession] Session not found for clientId: {clientId}, uuid: {uuid}, macAddress: {macAddress}, hostname: {hostname}"
+                );
 
                 message = "Session not found.";
                 return false;
@@ -349,7 +355,7 @@ namespace MyLanService
             {
                 if (_licenseInfo == null)
                 {
-                    Console.WriteLine("[IsStatementLimitReached] License info is not available.");
+                    _logger.LogInformation("[IsStatementLimitReached] License info is not available.");
                     return true; // Fail safe: assume limit is reached
                 }
 
@@ -357,6 +363,10 @@ namespace MyLanService
                 {
                     return false; // Never limited
                 }
+                _logger.LogInformation(_licenseInfo.ToString());
+                _logger.LogInformation(
+                    $"[IsStatementLimitReached] Current used statements: {_currentUsedStatements}, License limit: {_licenseInfo.NumberOfStatements}"
+                );
 
                 return _currentUsedStatements >= _licenseInfo.NumberOfStatements;
             }

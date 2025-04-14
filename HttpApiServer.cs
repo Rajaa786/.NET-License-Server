@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MyLanService.Utils;
+using Newtonsoft.Json.Linq;
 
 namespace MyLanService
 {
@@ -22,6 +23,8 @@ namespace MyLanService
         private readonly LicenseHelper _licenseHelper;
 
         private readonly HttpClient _httpClient;
+        private readonly string _djangoBaseUrl;
+
 
         public HttpApiHost(
             int port,
@@ -47,6 +50,15 @@ namespace MyLanService
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
             _licenseHelper = licenseHelper;
+            var envBaseUrl = Environment.GetEnvironmentVariable("DJANGO_BASEURL");
+            _djangoBaseUrl = string.IsNullOrWhiteSpace(envBaseUrl)
+                ? "http://localhost:8000"
+                : envBaseUrl.Trim();
+
+            _logger.LogInformation(
+                "Django base URL: {DjangoBaseUrl}",
+                _djangoBaseUrl
+            );
         }
 
         public async Task StartAsync(CancellationToken stoppingToken)
@@ -404,7 +416,7 @@ namespace MyLanService
                         {
                             Method = HttpMethod.Post,
                             RequestUri = new Uri(
-                                "http://localhost:8080/api/activate-offline-license/"
+                                $"{_djangoBaseUrl}/api/activate-offline-license/"
                             ), // Your Django URL
                             Content = requestBody,
                         };
@@ -430,20 +442,47 @@ namespace MyLanService
                             >(resultContent);
                             parsedResult["role"] = role;
 
+                            // var deviceInfo = json["deviceInfo"] as JObject;
+
+                            var currentTimestamp = parsedResult.ContainsKey("current_timestamp") && parsedResult["current_timestamp"] is JsonElement timestampElement
+                                ? timestampElement.GetDouble() // Get the value as a double
+                                    : 0.0; // Default value if not present or invalid
+
+                            var expiryTimestamp = parsedResult.ContainsKey("expiry_timestamp") && parsedResult["expiry_timestamp"] is JsonElement expiryElement
+                                ? expiryElement.GetDouble() // Get the value as a double
+                                : 0.0; // Default value if not present or invalid
+
+                            var numberOfUsers = parsedResult.ContainsKey("number_of_users") && parsedResult["number_of_users"] is JsonElement usersElement
+                                ? usersElement.GetInt32() // Get the value as an integer
+                                : 0; // Default value if not present or invalid
+
+                            // var licenseInfo = new LicenseInfo
+                            // {
+                            //     LicenseKey = parsedResult["license_key"]?.ToString(),
+                            //     // Username = deviceInfo["username"]?.ToString(),
+                            //     CurrentTimestamp = Convert.ToDouble(
+                            //         parsedResult["current_timestamp"]
+                            //     ),
+                            //     ExpiryTimestamp = Convert.ToDouble(
+                            //         parsedResult["expiry_timestamp"]
+                            //     ),
+                            //     NumberOfUsers = Convert.ToInt32(parsedResult["number_of_users"]),
+                            //     NumberOfStatements = Convert.ToInt32(
+                            //         parsedResult["number_of_statements"]
+                            //     ),
+                            //     Role = parsedResult["role"]?.ToString(),
+                            //     UsedStatements = 0, // Set used statements as needed
+                            // };
+
                             var licenseInfo = new LicenseInfo
                             {
                                 LicenseKey = parsedResult["license_key"]?.ToString(),
-                                Username = parsedResult["username"]?.ToString(),
-                                CurrentTimestamp = Convert.ToDouble(
-                                    parsedResult["current_timestamp"]
-                                ),
-                                ExpiryTimestamp = Convert.ToDouble(
-                                    parsedResult["expiry_timestamp"]
-                                ),
-                                NumberOfUsers = Convert.ToInt32(parsedResult["number_of_users"]),
-                                NumberOfStatements = Convert.ToInt32(
-                                    parsedResult["number_of_statements"]
-                                ),
+                                CurrentTimestamp = currentTimestamp,
+                                ExpiryTimestamp = expiryTimestamp,
+                                NumberOfUsers = numberOfUsers,
+                                NumberOfStatements = parsedResult.ContainsKey("number_of_statements") && parsedResult["number_of_statements"] is JsonElement statementsElement
+                                ? statementsElement.GetInt32()
+                                : 0, // Default value if not present or invalid
                                 Role = parsedResult["role"]?.ToString(),
                                 UsedStatements = 0, // Set used statements as needed
                             };
@@ -522,7 +561,11 @@ namespace MyLanService
                                 licenseFilePath
                             );
 
-                            _licenseinfoProvider.SetLicenseInfo(licenseInfo);
+                            _licenseInfoProvider.SetLicenseInfo(licenseInfo);
+                            _licenseStateManager._maxLicenses = licenseInfo.NumberOfUsers;
+                            _licenseStateManager._currentUsedStatements = licenseInfo.UsedStatements;
+                            _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+
 
                             return Results.Ok(JsonDocument.Parse(enrichedJson).RootElement);
                         }
@@ -740,6 +783,7 @@ namespace MyLanService
 
                         var payload = new
                         {
+                            license_key = _licenseInfoProvider.GetLicenseInfo().LicenseKey,
                             device_info = deviceInfo,
                             timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             event_type = "session-activation",
@@ -755,7 +799,7 @@ namespace MyLanService
                         {
                             Method = HttpMethod.Post,
                             RequestUri = new Uri(
-                                "http://localhost:8080/api/activate-license-session/"
+                                $"{_djangoBaseUrl}/api/activate-license-session/"
                             ),
                             Content = requestBody,
                         };
@@ -810,8 +854,11 @@ namespace MyLanService
                 || string.IsNullOrWhiteSpace(macAddress)
                 || !json.TryGetValue("hostname", out var hostname)
                 || string.IsNullOrWhiteSpace(hostname)
+                || !json.TryGetValue("username", out var username)
+                || string.IsNullOrWhiteSpace(username)
             )
             {
+                _logger.LogError("Missing or invalid deactivation parameters: {Json}", json);
                 return Results.BadRequest(
                     new { error = "Missing or invalid inactivation parameters." }
                 );
@@ -844,6 +891,7 @@ namespace MyLanService
 
                         var payload = new
                         {
+                            license_key = _licenseInfoProvider.GetLicenseInfo().LicenseKey,
                             device_info = deviceInfo,
                             timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                             event_type = "session-deactivation",
@@ -859,7 +907,7 @@ namespace MyLanService
                         {
                             Method = HttpMethod.Post,
                             RequestUri = new Uri(
-                                "http://localhost:8080/api/deactivate-license-session/"
+                                $"{_djangoBaseUrl}/api/deactivate-license-session/"
                             ),
                             Content = requestBody,
                         };
@@ -1191,8 +1239,8 @@ namespace MyLanService
                     {string.Join("", allSessions.Select(session => $@"
                     <tr>
                         <td>
-                            {(session.SessionDetails.Active 
-                                ? "<span class='status-active'><i class='fas fa-circle status-icon'></i> Active</span>" 
+                            {(session.SessionDetails.Active
+                                ? "<span class='status-active'><i class='fas fa-circle status-icon'></i> Active</span>"
                                 : "<span class='status-inactive'><i class='fas fa-circle status-icon'></i> Inactive</span>")}
                         </td>
                         <td>{session.SessionDetails.Hostname}</td>

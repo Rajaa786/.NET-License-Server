@@ -11,8 +11,8 @@ namespace MyLanService
         [JsonPropertyName("license_key")]
         public string LicenseKey { get; set; }
 
-        [JsonPropertyName("username")]
-        public string Username { get; set; }
+        // [JsonPropertyName("username")]
+        // public string Username { get; set; }
 
         [JsonPropertyName("current_timestamp")]
         public double CurrentTimestamp { get; set; }
@@ -48,7 +48,7 @@ namespace MyLanService
     {
         private readonly ILogger<LicenseInfoProvider> _logger;
 
-        private readonly LicenseInfo _licenseInfo;
+        private LicenseInfo _licenseInfo;
         private readonly LicenseHelper _licenseHelper;
 
         // Constructor with ILogger and LicenseInfo to inject logging and license data into LicenseInfoProvider
