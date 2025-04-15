@@ -4,7 +4,7 @@ namespace MyLanService.Utils
     {
         private readonly ILogger<PathUtility> _logger;
 
-        private PathUtility(ILogger<PathUtility> logger)
+        public PathUtility(ILogger<PathUtility> logger)
         {
             _logger = logger;
         }

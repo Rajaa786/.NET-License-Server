@@ -8,7 +8,7 @@ namespace MyLanService.Utils
     {
         private readonly ILogger<EncryptionUtility> _logger;
 
-        private EncryptionUtility(ILogger<EncryptionUtility> logger)
+        public EncryptionUtility(ILogger<EncryptionUtility> logger)
         {
             _logger = logger;
         }

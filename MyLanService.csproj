@@ -15,6 +15,10 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.3" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.3" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.3" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.1" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="Tmds.MDns" Version="0.8.0" />
     <PackageReference Include="Zeroconf" Version="3.7.16" />
   </ItemGroup>

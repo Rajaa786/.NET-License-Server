@@ -31,7 +31,8 @@ namespace MyLanService
             ILogger logger,
             LicenseStateManager licenseStateManager,
             LicenseInfoProvider licenseInfoProvider,
-            LicenseHelper licenseHelper
+            LicenseHelper licenseHelper,
+            IConfiguration configuration
         )
         {
             _port = port;
@@ -50,10 +51,13 @@ namespace MyLanService
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
             _licenseHelper = licenseHelper;
-            var envBaseUrl = Environment.GetEnvironmentVariable("DJANGO_BASEURL");
-            _djangoBaseUrl = string.IsNullOrWhiteSpace(envBaseUrl)
-                ? "http://localhost:8000"
-                : envBaseUrl.Trim();
+            // var envBaseUrl = Environment.GetEnvironmentVariable("DJANGO_BASEURL");
+            // _djangoBaseUrl = string.IsNullOrWhiteSpace(envBaseUrl)
+            //     ? "http://localhost:8000"
+            //     : envBaseUrl.Trim();
+
+            _djangoBaseUrl = configuration.GetValue<string>("Django:BaseUrl") ?? "http://localhost:8000";
+
 
             _logger.LogInformation(
                 "Django base URL: {DjangoBaseUrl}",
@@ -283,7 +287,7 @@ namespace MyLanService
                 {
                     try
                     {
-                        var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                        var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
                         string appFolder =
                             (
                                 !string.IsNullOrWhiteSpace(env)
@@ -497,7 +501,7 @@ namespace MyLanService
 
                             // ✅ Save encrypted license securely
                             // ✅ Determine the base directory based on the environment
-                            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                            var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
                             string appFolder =
                                 (
                                     !string.IsNullOrWhiteSpace(env)

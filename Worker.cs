@@ -27,14 +27,18 @@ namespace MyLanService
         private readonly LicenseHelper _licenseHelper;
         private readonly LicenseStateManager _licenseStateManager;
         private readonly LicenseInfoProvider _licenseInfoProvider;
+        private readonly IConfiguration _configuration;
 
         private HttpApiHost _httpApiHost;
+        
 
         public Worker(
             ILogger<Worker> logger,
             LicenseHelper licenseHelper,
             LicenseStateManager licenseStateManager,
-            LicenseInfoProvider licenseInfoProvider
+            LicenseInfoProvider licenseInfoProvider,
+            IConfiguration configuration
+            
         )
             : base()
         {
@@ -42,13 +46,14 @@ namespace MyLanService
             _licenseHelper = licenseHelper;
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
+            _configuration = configuration;
             _logger.LogInformation("Worker initialized.");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-            _logger.LogInformation($"Environment ASPNETCORE_ENVIRONMENT: {env}");
+            var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+            _logger.LogInformation($"Environment DOTNET_ENVIRONMENT: {env}");
             // string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
             //     ? Directory.GetCurrentDirectory()
             //     : AppContext.BaseDirectory;
@@ -72,8 +77,11 @@ namespace MyLanService
                     _logger,
                     _licenseStateManager,
                     _licenseInfoProvider,
-                    _licenseHelper
+                    _licenseHelper,
+                    _configuration
+                    
                 );
+
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
 
                 _logger.LogInformation("HTTP API Server started on port 7890");
@@ -90,7 +98,7 @@ namespace MyLanService
 
                 foreach (var a in MulticastService.GetIPAddresses())
                 {
-                    Console.WriteLine($"Got MDNS IP address {a}");
+                    _logger.LogInformation($"Got MDNS IP address {a}");
                 }
 
                 // _mdns.QueryReceived += (s, e) =>
@@ -112,7 +120,7 @@ namespace MyLanService
                 {
                     foreach (var nic in e.NetworkInterfaces)
                     {
-                        Console.WriteLine($"discovered NIC '{nic.Name}'");
+                        _logger.LogInformation($"discovered NIC '{nic.Name}'");
                     }
                 };
 

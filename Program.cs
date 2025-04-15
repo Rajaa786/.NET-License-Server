@@ -1,43 +1,77 @@
-// using Microsoft.Extensions.DependencyInjection;
-// using Microsoft.Extensions.Hosting;
-// using MyLanService;
-
-// IHost host = Host.CreateDefaultBuilder(args)
-//     .UseWindowsService() // Enable Windows Service integration
-//     .ConfigureServices((hostContext, services) =>
-//     {
-//         services.AddHostedService<Worker>();
-//     })
-//     .Build();
-
-// await host.RunAsync();
-
-
-
-
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
+using Serilog;
+using Serilog.Sinks.File;
+using Serilog.Settings.Configuration;
 using MyLanService;
 using MyLanService.Utils;
+using System.IO; // Add this for Path operations
 
-var builder = Host.CreateDefaultBuilder(args)
-    .ConfigureServices(
-        (hostContext, services) =>
+
+// Get EXE directory and build log path
+var exeDir = AppContext.BaseDirectory;
+var logPath = Path.Combine(exeDir, "logs", "gateway", "gateway_.txt");
+var logDir = Path.GetDirectoryName(logPath);
+
+// Ensure directory exists
+if (!Directory.Exists(logDir))
+{
+    Directory.CreateDirectory(logDir);
+}
+
+// Load configuration
+var configuration = new ConfigurationBuilder()
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .Build();
+
+// Configure Serilog - use config for settings except file path
+var options = new ConfigurationReaderOptions(typeof(FileLoggerConfigurationExtensions).Assembly);
+
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(configuration, options)
+    .WriteTo.File(
+        path: logPath,
+        rollingInterval: RollingInterval.Day,
+        fileSizeLimitBytes: 1000,
+        retainedFileCountLimit: 31
+    )
+    .Enrich.FromLogContext()
+    .CreateLogger();
+
+
+try
+{
+    Log.Information("Starting service...");
+    Log.Information("Actual log path: {LogPath}", Path.GetFullPath(logPath));
+
+    var builder = Host.CreateDefaultBuilder(args)
+        .UseSerilog()
+        .ConfigureServices((hostContext, services) =>
         {
+            Log.Information(">>> ENVIRONMENT: {Env}", hostContext.HostingEnvironment.EnvironmentName);
+
             services.AddSingleton<LicenseHelper>();
             services.AddSingleton<LicenseInfoProvider>();
             services.AddSingleton<LicenseStateManager>();
             services.AddSingleton<PathUtility>();
             services.AddSingleton<EncryptionUtility>();
             services.AddHostedService<Worker>();
-        }
-    );
+        });
 
-if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-{
-    builder.UseWindowsService(); // Only add this on Windows
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+    {
+        builder.UseWindowsService();
+    }
+
+    await builder.Build().RunAsync();
 }
-
-IHost host = builder.Build();
-await host.RunAsync();
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Service terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}

@@ -73,7 +73,7 @@ namespace MyLanService
         {
             try
             {
-                var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
                 string appFolder =
                     (
                         !string.IsNullOrWhiteSpace(env)

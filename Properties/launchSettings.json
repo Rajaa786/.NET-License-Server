@@ -5,9 +5,7 @@
       "commandName": "Project",
       "dotnetRunMessages": true,
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "DJANGO_BASEURL": "http://localhost:8000"
-
+        "DOTNET_ENVIRONMENT": "Production",
       }
     }
   }
