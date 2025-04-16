@@ -30,7 +30,7 @@ namespace MyLanService
         private readonly IConfiguration _configuration;
 
         private HttpApiHost _httpApiHost;
-        
+
 
         public Worker(
             ILogger<Worker> logger,
@@ -38,7 +38,7 @@ namespace MyLanService
             LicenseStateManager licenseStateManager,
             LicenseInfoProvider licenseInfoProvider,
             IConfiguration configuration
-            
+
         )
             : base()
         {
@@ -79,7 +79,7 @@ namespace MyLanService
                     _licenseInfoProvider,
                     _licenseHelper,
                     _configuration
-                    
+
                 );
 
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
@@ -88,9 +88,9 @@ namespace MyLanService
 
                 // _logger.LogInformation($"TCP Server started on port {Port}");
 
-                // Initialize mDNS components.
-                // _mdns = new MulticastService();
+                await WaitForNetworkAsync(10, 3000, stoppingToken);
 
+                // Initialize mDNS components.
                 var localIP = GetLocalIPAddress();
 
                 // Use the constructor with a filter to select only the matching NIC
@@ -166,6 +166,29 @@ namespace MyLanService
                 _mdns?.Dispose();
             }
         }
+
+        // Helper method to check if the network is ready.
+        private async Task WaitForNetworkAsync(int maxRetries = 10, int delayMilliseconds = 3000, CancellationToken cancellationToken = default)
+        {
+            _logger.LogInformation("Waiting for network to be ready...");
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    var ip = GetLocalIPAddress(); // Your existing logic
+                    _logger.LogInformation($"Network is ready with IP: {ip}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Network not ready yet (attempt {i + 1}/{maxRetries}): {ex.Message}");
+                    await Task.Delay(delayMilliseconds * (int)Math.Pow(2, i), cancellationToken);
+                }
+            }
+
+            throw new Exception("Network did not become ready in time.");
+        }
+
 
         // Helper method to retrieve the local IPv4 address.
         private IPAddress GetLocalIPAddress()

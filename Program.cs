@@ -34,7 +34,8 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.File(
         path: logPath,
         rollingInterval: RollingInterval.Day,
-        fileSizeLimitBytes: 1000,
+        fileSizeLimitBytes: 104857600,
+        rollOnFileSizeLimit: true,
         retainedFileCountLimit: 31
     )
     .Enrich.FromLogContext()
