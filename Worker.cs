@@ -57,21 +57,8 @@ namespace MyLanService
             // string baseDir = (!string.IsNullOrWhiteSpace(env) && env.Equals("Development", StringComparison.OrdinalIgnoreCase))
             //     ? Directory.GetCurrentDirectory()
             //     : AppContext.BaseDirectory;
-            _logger.LogInformation("TCP Server starting...");
-
             try
             {
-                // This triggers the singleton constructor, loading the license
-                // _ = LicenseInfoProvider.Instance;
-
-                // _logger.LogInformation("License info loaded successfully.");
-                // Initialize the TCP listener with address reuse enabled.
-                // _tcpListener = new TcpListener(IPAddress.Any, Port);
-                // _tcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                // _tcpListener.Start();
-                _tcpApiServer = new TcpApiServer(TcpPort, _logger);
-                var tcpTask = _tcpApiServer.StartAsync(stoppingToken);
-
                 _httpApiHost = new HttpApiHost(
                     HttpPort,
                     _logger,
@@ -83,10 +70,10 @@ namespace MyLanService
                 );
 
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
+                var licensePollingTask = _httpApiHost.StartLicensePollingAsync(stoppingToken);
+
 
                 _logger.LogInformation("HTTP API Server started on port 7890");
-
-                // _logger.LogInformation($"TCP Server started on port {Port}");
 
                 await WaitForNetworkAsync(10, 3000, stoppingToken);
 
@@ -96,53 +83,34 @@ namespace MyLanService
                 // Use the constructor with a filter to select only the matching NIC
                 _mdns = new MulticastService();
 
-                foreach (var a in MulticastService.GetIPAddresses())
-                {
-                    _logger.LogInformation($"Got MDNS IP address {a}");
-                }
-
-                // _mdns.QueryReceived += (s, e) =>
+                // foreach (var a in MulticastService.GetIPAddresses())
                 // {
-                //     var names = e.Message.Questions
-                //         .Select(q => q.Name + " " + q.Type);
-                //     Console.WriteLine($"got a query for {String.Join(", ", names)}");
-                // };
+                //     _logger.LogInformation($"Got MDNS IP address {a}");
+                // }
 
-                // _mdns.AnswerReceived += (s, e) =>
+                // _mdns.NetworkInterfaceDiscovered += (s, e) =>
                 // {
-                //     var names = e.Message.Answers
-                //         .Select(q => q.Name + " " + q.Type)
-                //         .Distinct();
-                //     Console.WriteLine($"got answer for {String.Join(", ", names)}");
+                //     foreach (var nic in e.NetworkInterfaces)
+                //     {
+                //         _logger.LogInformation($"discovered NIC '{nic.Name}'");
+                //     }
                 // };
-
-                _mdns.NetworkInterfaceDiscovered += (s, e) =>
-                {
-                    foreach (var nic in e.NetworkInterfaces)
-                    {
-                        _logger.LogInformation($"discovered NIC '{nic.Name}'");
-                    }
-                };
 
                 _serviceDiscovery = new ServiceDiscovery(_mdns);
 
                 // Get system hostname and local network IP address.
                 string systemHostname = Dns.GetHostName();
-                // IPAddress localIP = GetLocalIPAddress();
 
                 _logger.LogInformation($"IP address: {localIP}");
 
                 // Create a service profile with your hostname and port.
                 var serviceProfile = new ServiceProfile(
-                    instanceName: systemHostname, // Friendly name for your service
-                    serviceName: "_license-server._tcp", // Service type (without .local)
+                    instanceName: systemHostname,
+                    serviceName: "_license-server._tcp",
                     port: HttpPort
                 );
 
-                // Optionally, add a TXT record.
                 serviceProfile.AddProperty("description", "My TCP Server Service");
-                // Map the service to your local network IP address.
-                // serviceProfile.Addresses.Add(localIP);
 
                 // Advertise the service via mDNS.
                 _serviceDiscovery.Advertise(serviceProfile);
@@ -151,8 +119,7 @@ namespace MyLanService
                     $"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}"
                 );
 
-                // Wait for TCP server to complete (usually runs until cancellation)
-                await Task.WhenAll(tcpTask, httpTask);
+                await Task.WhenAll(httpTask, licensePollingTask);
             }
             catch (Exception ex)
             {

@@ -69,6 +69,20 @@ namespace MyLanService
 
         public void SetLicenseInfo(LicenseInfo licenseInfo) => _licenseInfo = licenseInfo;
 
+
+        public void SetExpiry(double expiryTimestamp)
+        {
+            if (_licenseInfo != null && !string.IsNullOrWhiteSpace(_licenseInfo.LicenseKey))
+            {
+                _logger.LogInformation($"[SetExpiry] Updating license expiry from {_licenseInfo.ExpiryTimestamp} to {expiryTimestamp}");
+                _licenseInfo.ExpiryTimestamp = expiryTimestamp;
+            }
+            else
+            {
+                _logger.LogWarning("[SetExpiry] Cannot update expiry, LicenseInfo is not initialized or invalid.");
+            }
+        }
+
         private LicenseInfo LoadLicenseInfo()
         {
             try

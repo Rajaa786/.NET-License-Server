@@ -9,6 +9,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MyLanService.Utils;
 using Newtonsoft.Json.Linq;
+using System.Text.Json.Serialization;
+
 
 namespace MyLanService
 {
@@ -609,7 +611,7 @@ namespace MyLanService
             )
             {
                 return Results.BadRequest(
-                    new { error = "Missing or invalid license client information." }
+                    new { error = "Missing or invalid license client information.", errorCode = "invalid-parameters" }
                 );
             }
 
@@ -634,7 +636,7 @@ namespace MyLanService
             )
             {
                 return Results.Json(
-                    new { error = "License not loaded, corrupted, or invalid." },
+                    new { error = "License not loaded, corrupted, or invalid.", errorCode = "license-not-loaded" },
                     statusCode: StatusCodes.Status500InternalServerError
                 );
             }
@@ -679,18 +681,42 @@ namespace MyLanService
             {
                 // If all licenses are full and no new license could be assigned,
                 // return the list of inactive licenses (Active == false)
-                var inactiveLicenses = _licenseStateManager.GetInactiveLicensesWithKey();
-                return Results.Json(
-                    new
-                    {
-                        success = false,
-                        error = message,
-                        inactiveLicenses,
-                        activeCount = _licenseStateManager.ActiveCount,
-                        maxUsers = licenseInfo.NumberOfUsers,
-                    },
-                    statusCode: StatusCodes.Status429TooManyRequests
-                );
+                IEnumerable<object> inactiveLicenses = _licenseStateManager.GetInactiveLicensesWithKey();
+
+                if (inactiveLicenses.Any())
+                {
+                    return Results.Json(
+                        new
+                        {
+                            success = false,
+                            error = message,
+                            licenseCount = inactiveLicenses.Count(),
+                            inactiveLicenses,
+                            activeCount = _licenseStateManager.ActiveCount,
+                            maxUsers = licenseInfo.NumberOfUsers,
+                        },
+                        statusCode: StatusCodes.Status429TooManyRequests
+                    );
+                }
+                else
+                {
+                    // If no inactive licenses, send the list of active sessions
+                    var activeLicenses = _licenseStateManager.GetActiveLicensesWithKey();
+                    var licenseCount = _licenseStateManager._maxLicenses;
+
+                    return Results.Json(
+                        new
+                        {
+                            success = false,
+                            error = "No license available.",
+                            licenseCount,
+                            activeLicenses,
+                            activeCount = _licenseStateManager.ActiveCount,
+                            maxUsers = licenseInfo.NumberOfUsers,
+                        },
+                        statusCode: StatusCodes.Status429TooManyRequests
+                    );
+                }
             }
         }
 
@@ -756,7 +782,11 @@ namespace MyLanService
             )
             {
                 return Results.BadRequest(
-                    new { error = "Missing or invalid activation parameters." }
+                    new
+                    {
+                        error = "Missing or invalid activation parameters.",
+                        errorCode = "invalid-parameters"
+                    }
                 );
             }
 
@@ -842,7 +872,7 @@ namespace MyLanService
                 );
             }
 
-            return Results.BadRequest(new { error = message });
+            return Results.BadRequest(new { error = message, errorCode = "session-not-available" });
         }
 
         private async Task<IResult> HandleDeactivateSession(HttpContext context)
@@ -962,6 +992,77 @@ namespace MyLanService
                 // No need to call _app.Dispose();
             }
         }
+
+
+        public async Task StartLicensePollingAsync(CancellationToken stoppingToken)
+        {
+            _logger.LogInformation("Starting license polling...");
+            await PollLicenseStatusAsync(stoppingToken);
+        }
+
+        private async Task PollLicenseStatusAsync(CancellationToken stoppingToken)
+        {
+            var checkInterval = TimeSpan.FromSeconds(10);
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    // Check if license info is present before making a request
+                    var licenseKey = _licenseInfoProvider.GetLicenseInfo().LicenseKey.Trim();
+                    if (string.IsNullOrWhiteSpace(licenseKey))
+                    {
+                        _logger.LogWarning("[License Polling] No license key found. Skipping poll.");
+                    }
+                    else
+                    {
+                        // var deviceInfo = _licenseHelper.GetDeviceInfo();
+
+                        var requestData = new
+                        {
+                            license_key = licenseKey,
+                            // device_info = deviceInfo
+                        };
+
+                        var json = JsonSerializer.Serialize(requestData);
+                        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                        var apiUrl = $"{_djangoBaseUrl}/api/check-license-status/";
+                        var response = await _httpClient.PostAsync(apiUrl, content, stoppingToken);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var responseContent = await response.Content.ReadAsStringAsync();
+                            var result = JsonSerializer.Deserialize<LicenseStatusResponse>(responseContent);
+
+                            _logger.LogInformation($"[License Polling] Expiry: {result.ExpiryTimestamp}");
+
+                            _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"[License Polling] Status: {response.StatusCode}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[License Polling] Exception occurred");
+                }
+
+                await Task.Delay(checkInterval, stoppingToken);
+            }
+        }
+
+        private class LicenseStatusResponse
+        {
+            [JsonPropertyName("license_key")]
+            public string LicenseKey { get; set; }
+
+            [JsonPropertyName("expiry_timestamp")]
+            public double ExpiryTimestamp { get; set; }
+        }
+
 
         private async Task<IResult> HandleAllLicenseStatus()
         {

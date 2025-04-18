@@ -10,6 +10,7 @@ namespace MyLanService
 {
     public class LicenseSession
     {
+        public string SessionId { get; set; }
         public string ClientId { get; set; }
         public string UUID { get; set; }
         public string Hostname { get; set; }
@@ -57,6 +58,8 @@ namespace MyLanService
             );
 
             _activeLicenses = new ConcurrentDictionary<string, LicenseSession>();
+            LoadSessionsFromDisk();
+
         }
 
         private bool IsUnlimitedStatements => _licenseInfo?.NumberOfStatements == -1;
@@ -140,6 +143,7 @@ namespace MyLanService
 
                 session = new LicenseSession
                 {
+                    SessionId = sessionKey,
                     ClientId = clientId,
                     UUID = uuid,
                     MACAddress = macAddress,
@@ -292,6 +296,21 @@ namespace MyLanService
             }
         }
 
+        public IEnumerable<object> GetActiveLicensesWithKey()
+        {
+            lock (_lock)
+            {
+                // Return an anonymous object containing the session key and the license session data
+                return _activeLicenses
+                    .Where(kvp => kvp.Value.Active)
+                    .Select(kvp => new { sessionKey = kvp.Key, sessionDetails = kvp.Value })
+                    .ToList();
+            }
+        }
+
+
+
+
         public int ActiveCount => _activeLicenses.Count;
         public string[] ActiveClients => _activeLicenses.Keys.ToArray();
 
@@ -372,6 +391,67 @@ namespace MyLanService
             }
         }
 
+        public void SaveSessionsToDisk()
+        {
+            try
+            {
+                var allSessions = _activeLicenses.Values.ToList();
+
+                if (allSessions.Count == 0) return;
+
+                var json = JsonSerializer.Serialize(allSessions, new JsonSerializerOptions
+                {
+                    WriteIndented = false
+                });
+
+                var encryptedBytes = _licenseHelper.GetEncryptedBytes(json);
+                var filePath = _licenseHelper.GetSessionCacheFilePath();
+
+                _licenseHelper.WriteBytesSync(filePath, encryptedBytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error saving sessions to disk: {ex.Message}", ex);
+            }
+        }
+
+
+
+        public void LoadSessionsFromDisk()
+        {
+            try
+            {
+                var filePath = _licenseHelper.GetSessionCacheFilePath();
+
+                if (!File.Exists(filePath))
+                {
+                    _logger.LogInformation("No previous session cache found.");
+                    return;
+                }
+
+                var encryptedBytes = _licenseHelper.ReadBytesSync(filePath);
+                var decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
+
+                if (string.IsNullOrWhiteSpace(decryptedJson)) return;
+
+                var sessions = JsonSerializer.Deserialize<List<LicenseSession>>(decryptedJson);
+
+                if (sessions == null) return;
+
+                foreach (var session in sessions)
+                {
+                    _activeLicenses.TryAdd(session.SessionId, session);
+                }
+
+                _logger.LogInformation($"Restored {sessions.Count} sessions from disk.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Failed to load session cache: {ex.Message}", ex);
+            }
+        }
+
+
         /// <summary>
         /// Flushes the current used statements back to disk.
         /// This method updates the in-memory LicenseInfo (UsedStatements field)
@@ -447,6 +527,7 @@ namespace MyLanService
             }
         }
 
+
         /// <summary>
         /// Public method to flush the current license state to disk.
         /// This should be called on application close to ensure that the latest statement usage is persisted.
@@ -456,6 +537,7 @@ namespace MyLanService
             lock (_lock)
             {
                 FlushToDisk();
+                SaveSessionsToDisk();
             }
         }
     }
