@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using MyLanService.Utils;
 using Newtonsoft.Json.Linq;
 using System.Text.Json.Serialization;
+using MyLanService.Middlewares;
 
 
 namespace MyLanService
@@ -75,6 +76,19 @@ namespace MyLanService
             builder.Services.AddControllers().AddNewtonsoftJson();
 
             var app = builder.Build();
+
+            // Register the middleware with its dependencies
+            app.Use(async (context, next) =>
+            {
+                var middleware = new LicenseExpiryMiddleware(
+                    next,
+                    _logger,
+                    _licenseInfoProvider,
+                    async () => await TryResyncLicenseAsync(),
+                    async () => await ReportClockTamperingAsync()
+                );
+                await middleware.InvokeAsync(context);
+            });
 
             // ✅ Load encrypted license info & init license manager
             var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
@@ -491,6 +505,7 @@ namespace MyLanService
                                 : 0, // Default value if not present or invalid
                                 Role = parsedResult["role"]?.ToString(),
                                 UsedStatements = 0, // Set used statements as needed
+                                SystemUpTime = Environment.TickCount64
                             };
 
                             // Serialize enriched response
@@ -861,12 +876,17 @@ namespace MyLanService
                     }
                 });
 
+
+                var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+                var remainingSeconds = (long)Math.Floor(_licenseHelper.GetRemainingLicenseSeconds(licenseInfo, ReportClockTamperingAsync));
+
                 return Results.Ok(
                     new
                     {
                         success = true,
                         clientId,
                         message,
+                        remainingSeconds,
                         activeCount = _licenseStateManager.ActiveCount,
                     }
                 );
@@ -1002,57 +1022,141 @@ namespace MyLanService
 
         private async Task PollLicenseStatusAsync(CancellationToken stoppingToken)
         {
-            var checkInterval = TimeSpan.FromSeconds(10);
+            var checkInterval = TimeSpan.FromSeconds(30);
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    // Check if license info is present before making a request
-                    var licenseKey = _licenseInfoProvider.GetLicenseInfo().LicenseKey.Trim();
-                    if (string.IsNullOrWhiteSpace(licenseKey))
+                    if (await TryResyncLicenseAsync(stoppingToken))
                     {
-                        _logger.LogWarning("[License Polling] No license key found. Skipping poll.");
+                        _logger.LogInformation("[License Polling] License resynced successfully.");
                     }
                     else
                     {
-                        // var deviceInfo = _licenseHelper.GetDeviceInfo();
-
-                        var requestData = new
-                        {
-                            license_key = licenseKey,
-                            // device_info = deviceInfo
-                        };
-
-                        var json = JsonSerializer.Serialize(requestData);
-                        var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                        var apiUrl = $"{_djangoBaseUrl}/api/check-license-status/";
-                        var response = await _httpClient.PostAsync(apiUrl, content, stoppingToken);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            var responseContent = await response.Content.ReadAsStringAsync();
-                            var result = JsonSerializer.Deserialize<LicenseStatusResponse>(responseContent);
-
-                            _logger.LogInformation($"[License Polling] Expiry: {result.ExpiryTimestamp}");
-
-                            _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
-                        }
-                        else
-                        {
-                            _logger.LogWarning($"[License Polling] Status: {response.StatusCode}");
-                        }
+                        _logger.LogWarning("[License Polling] Failed to resync license.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "[License Polling] Exception occurred");
+                    _logger.LogError("[License Polling] Error while resyncing license: {0}", ex.Message);
                 }
+
 
                 await Task.Delay(checkInterval, stoppingToken);
             }
         }
+
+
+        private async Task<bool> ReportClockTamperingAsync()
+        {
+            try
+            {
+                var licenseKey = _licenseInfoProvider.GetLicenseInfo().LicenseKey.Trim();
+                var deviceInfo = _licenseHelper.GetDeviceInfo();
+                var payload = new
+                {
+                    license_key = licenseKey,
+                    device_info = deviceInfo
+                };
+
+                string jsonPayload = JsonSerializer.Serialize(payload);
+                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                var apiUrl = $"{_djangoBaseUrl}/api/report-clock-tampering/";
+
+                HttpResponseMessage response = await _httpClient.PostAsync(apiUrl, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Clock tampering reported successfully.");
+                    return true;
+                }
+                else
+                {
+                    string errorResponse = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"Failed to report clock tampering. Status: {response.StatusCode}, Response: {errorResponse}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Exception while reporting clock tampering: {ex.Message}");
+                return false;
+            }
+        }
+
+
+        private async Task<bool> TryResyncLicenseAsync(CancellationToken stoppingToken = default)
+        {
+            try
+            {
+                // Check if license info is present before making a request
+                var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+
+                if (licenseInfo == null || !licenseInfo.IsValid())
+                {
+                    _logger.LogWarning("[License Polling] License info is null. Skipping poll.");
+                    return false;
+                }
+
+                var licenseKey = licenseInfo.LicenseKey;
+
+                if (string.IsNullOrWhiteSpace(licenseKey))
+                {
+                    _logger.LogWarning("[License Polling] No license key found. Skipping poll.");
+                    return false;
+                }
+
+                licenseKey = licenseKey.Trim();
+
+
+                // var deviceInfo = _licenseHelper.GetDeviceInfo();
+
+                var requestData = new
+                {
+                    license_key = licenseKey,
+                    // device_info = deviceInfo
+                };
+
+                var json = JsonSerializer.Serialize(requestData);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                var apiUrl = $"{_djangoBaseUrl}/api/check-license-status/";
+                var response = await _httpClient.PostAsync(apiUrl, content, stoppingToken);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    var result = JsonSerializer.Deserialize<LicenseStatusResponse>(responseContent);
+
+                    _logger.LogInformation($"[License Polling] Expiry: {result.ExpiryTimestamp}");
+
+                    _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
+                    _licenseInfoProvider.SetServerCurrentTime(result.CurrentTimestamp);
+                    _licenseInfoProvider.SetSystemUpTime(Environment.TickCount64);
+
+                    _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+
+                    _logger.LogInformation("[License Polling] LicenseInfo: {0}", _licenseStateManager._licenseInfo.ToString());
+                    _logger.LogInformation("[License Polling] LicenseInfo: {0}", _licenseInfoProvider.GetLicenseInfo().ToString());
+
+                    return true;
+                }
+                else
+                {
+                    _logger.LogWarning($"[License Polling] Status: {response.StatusCode}");
+                    return false;
+                }
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[License Polling] Exception occurred");
+                return false;
+            }
+        }
+
 
         private class LicenseStatusResponse
         {
@@ -1061,6 +1165,9 @@ namespace MyLanService
 
             [JsonPropertyName("expiry_timestamp")]
             public double ExpiryTimestamp { get; set; }
+
+            [JsonPropertyName("current_timestamp")]
+            public double CurrentTimestamp { get; set; }
         }
 
 

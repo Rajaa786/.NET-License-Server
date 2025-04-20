@@ -332,5 +332,62 @@ namespace MyLanService.Utils
 
             return JsonSerializer.Serialize(deviceInfo);
         }
+
+
+        public double GetEffectiveTimestamp(LicenseInfo licenseInfo, Func<Task<bool>> reportClockTamperingCallback = null)
+        {
+            var systemCurrentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var licenseGeneratedTimestamp = licenseInfo.CurrentTimestamp;
+
+            double effectiveCurrentTimestamp;
+
+            // 🛡️ Clock tampering check
+            if (systemCurrentTimestamp < licenseGeneratedTimestamp)
+            {
+                _logger?.LogWarning("⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
+                    systemCurrentTimestamp, licenseGeneratedTimestamp);
+
+                if (reportClockTamperingCallback != null)
+                {
+                    // Run the tampering report in a background fire-and-forget task
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var result = await reportClockTamperingCallback();
+                            _logger?.LogInformation("System clock tampering report sent. Success: {Result}", result);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogError(ex, "Failed to report system clock tampering.");
+                        }
+                    });
+                }
+
+                // Use license timestamp to stay consistent
+                effectiveCurrentTimestamp = licenseGeneratedTimestamp;
+            }
+            else
+            {
+                effectiveCurrentTimestamp = systemCurrentTimestamp;
+            }
+
+            return effectiveCurrentTimestamp;
+        }
+
+
+        public double GetRemainingLicenseSeconds(LicenseInfo licenseInfo, Func<Task<bool>> reportClockTamperingCallback = null)
+        {
+            if (licenseInfo == null || !licenseInfo.IsValid())
+                return 0;
+
+            var licenseExpiryTimestamp = licenseInfo.ExpiryTimestamp;
+            double effectiveCurrentTimestamp = GetEffectiveTimestamp(licenseInfo, reportClockTamperingCallback);
+            // Calculate remaining seconds
+            double remainingSeconds = licenseExpiryTimestamp - effectiveCurrentTimestamp;
+            return remainingSeconds < 0 ? 0 : remainingSeconds;
+
+        }
+
     }
 }

@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Tail Latest Gateway Log (Windows)",
+        "type": "shell",
+        "command": "powershell",
+        "args": [
+          "-Command",
+          "Get-ChildItem 'C:\\Users\\admin\\Desktop\\MyLanService\\logs\\gateway' -Filter 'gateway_*.txt' | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Get-Content $_.FullName -Wait -Tail 30 }"
+        ],
+        "problemMatcher": [],
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      }
+    ]
+  }
+  

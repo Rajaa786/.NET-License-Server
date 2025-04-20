@@ -31,6 +31,8 @@ namespace MyLanService
 
         public int UsedStatements { get; set; }
 
+        public long SystemUpTime { get; set; }
+
         public bool IsValid()
         {
             return !string.IsNullOrWhiteSpace(LicenseKey)
@@ -80,6 +82,32 @@ namespace MyLanService
             else
             {
                 _logger.LogWarning("[SetExpiry] Cannot update expiry, LicenseInfo is not initialized or invalid.");
+            }
+        }
+
+        public void SetServerCurrentTime(double currentTime)
+        {
+            if (_licenseInfo != null && !string.IsNullOrWhiteSpace(_licenseInfo.LicenseKey))
+            {
+                _logger.LogInformation($"[SetServerCurrentTime] Updating license current time from {_licenseInfo.CurrentTimestamp} to {currentTime}");
+                _licenseInfo.CurrentTimestamp = currentTime;
+            }
+            else
+            {
+                _logger.LogWarning("[SetServerCurrentTime] Cannot update current time, LicenseInfo is not initialized or invalid.");
+            }
+        }
+
+        public void SetSystemUpTime(long systemUpTime)
+        {
+            if (_licenseInfo != null && !string.IsNullOrWhiteSpace(_licenseInfo.LicenseKey))
+            {
+                _logger.LogInformation($"[SetSystemUpTime] Updating license system up time from {_licenseInfo.SystemUpTime} to {systemUpTime}");
+                _licenseInfo.SystemUpTime = systemUpTime;
+            }
+            else
+            {
+                _logger.LogWarning("[SetSystemUpTime] Cannot update system up time, LicenseInfo is not initialized or invalid.");
             }
         }
 

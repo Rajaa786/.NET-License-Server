@@ -119,7 +119,7 @@ namespace MyLanService
                     $"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}"
                 );
 
-                await Task.WhenAll(httpTask, licensePollingTask);
+                await Task.WhenAll(licensePollingTask, httpTask);
             }
             catch (Exception ex)
             {

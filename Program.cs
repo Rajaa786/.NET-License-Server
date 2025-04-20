@@ -7,12 +7,17 @@ using Serilog.Sinks.File;
 using Serilog.Settings.Configuration;
 using MyLanService;
 using MyLanService.Utils;
+using MyLanService.Middlewares;
 using System.IO; // Add this for Path operations
 
 
-// Get EXE directory and build log path
-var exeDir = AppContext.BaseDirectory;
-var logPath = Path.Combine(exeDir, "logs", "gateway", "gateway_.txt");
+// Determine environment and set appropriate log directory
+var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
+string logBaseDir = environment.Equals("Development", StringComparison.OrdinalIgnoreCase)
+    ? Directory.GetCurrentDirectory()  // Use project directory in development
+    : AppContext.BaseDirectory;       // Use executable directory in production
+
+var logPath = Path.Combine(logBaseDir, "logs", "gateway", "gateway_.txt");
 var logDir = Path.GetDirectoryName(logPath);
 
 // Ensure directory exists
