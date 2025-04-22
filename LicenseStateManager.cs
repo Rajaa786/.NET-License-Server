@@ -440,6 +440,7 @@ namespace MyLanService
 
                 foreach (var session in sessions)
                 {
+                    session.Active = false; // 👈 Mark session as inactive
                     _activeLicenses.TryAdd(session.SessionId, session);
                 }
 
