@@ -587,6 +587,8 @@ namespace MyLanService
                             _licenseStateManager._currentUsedStatements = licenseInfo.UsedStatements;
                             _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
 
+                            _logger.LogInformation("While Activation License info : {0}", _licenseInfoProvider.GetLicenseInfo());
+
 
                             return Results.Ok(JsonDocument.Parse(enrichedJson).RootElement);
                         }

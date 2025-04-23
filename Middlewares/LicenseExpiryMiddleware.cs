@@ -56,6 +56,7 @@ namespace MyLanService.Middlewares
 
                 // Retrieve the license info from LicenseInfoProvider
                 var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+                _logger.LogInformation("Middleware LicenseInfo: {0}", licenseInfo);
 
                 // Check if the license is valid
                 if (licenseInfo == null || !licenseInfo.IsValid())
@@ -93,7 +94,7 @@ namespace MyLanService.Middlewares
                 var licenseExpiryTimestamp = licenseInfo.ExpiryTimestamp;
 
                 // 🛡️ Clock tampering check: system time is behind license time
-                if (systemCurrentTimestamp < licenseGeneratedTimestamp)
+                if (Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
                 {
                     _logger.LogWarning("⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
                         systemCurrentTimestamp, licenseGeneratedTimestamp);

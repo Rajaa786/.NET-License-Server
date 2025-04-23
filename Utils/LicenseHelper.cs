@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Net.NetworkInformation;
 
+
 namespace MyLanService.Utils
 {
     public class MacUtils
@@ -342,7 +343,7 @@ namespace MyLanService.Utils
             double effectiveCurrentTimestamp;
 
             // 🛡️ Clock tampering check
-            if (systemCurrentTimestamp < licenseGeneratedTimestamp)
+            if (Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
             {
                 _logger?.LogWarning("⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
                     systemCurrentTimestamp, licenseGeneratedTimestamp);
