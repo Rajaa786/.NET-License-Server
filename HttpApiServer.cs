@@ -1134,7 +1134,7 @@ namespace MyLanService
         public async Task StartLicensePollingAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Starting license polling...");
-            // await PollLicenseStatusAsync(stoppingToken);
+            await PollLicenseStatusAsync(stoppingToken);
         }
 
         private async Task PollLicenseStatusAsync(CancellationToken stoppingToken)
