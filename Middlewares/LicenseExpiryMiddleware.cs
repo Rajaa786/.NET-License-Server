@@ -45,6 +45,9 @@ namespace MyLanService.Middlewares
                     "/license/status/all/",
                     "/db/test/firewall",
                     "/db/test/network",
+                    "/db/provision/download",
+                    "/db/provision/download",
+                    "/db/provision/status",
                 };
 
                 // Skip license check for excluded endpoints

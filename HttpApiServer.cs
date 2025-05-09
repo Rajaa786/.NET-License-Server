@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MyLanService.Middlewares;
 using MyLanService.Utils;
+using MysticMind.PostgresEmbed;
 using Newtonsoft.Json.Linq;
 
 namespace MyLanService
@@ -77,6 +78,8 @@ namespace MyLanService
             _licenseHelper.GetFingerprint();
             var builder = WebApplication.CreateBuilder();
 
+            builder.Services.AddSingleton<ProvisionStatusStore>();
+
             builder.Services.AddControllers().AddNewtonsoftJson();
 
             var app = builder.Build();
@@ -137,6 +140,59 @@ namespace MyLanService
                     """;
 
                     return Results.Content(html, "text/html");
+                }
+            );
+
+            app.MapGet(
+                "/db/provision/status",
+                async (ProvisionStatusStore statusStore) =>
+                {
+                    var status = statusStore.GetStatus();
+
+                    var response = new
+                    {
+                        status = status.Status ?? "unknown",
+                        logs = status.Logs ?? new List<string>(),
+                        progress = status.Progress is >= 0 and <= 100 ? status.Progress : 0,
+                        error = status.Error ?? string.Empty,
+                        timestamp = DateTime.UtcNow,
+                    };
+
+                    return Results.Ok(response);
+                }
+            );
+
+            app.MapPost(
+                "/db/provision/download",
+                async (ProvisionStatusStore statusStore) =>
+                {
+                    statusStore.Reset();
+                    statusStore.SetStatus("starting");
+                    statusStore.AddLog("Starting PostgreSQL binary setup...");
+
+                    try
+                    {
+                        string baseDir = AppContext.BaseDirectory;
+                        string dataDir = Path.Combine(baseDir, "pgdata");
+
+                        _logger.LogInformation("Data directory: {DataDir}", dataDir);
+
+                        using var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
+                        await server.StartAsync();
+
+                        statusStore.SetStatus("completed", null, 100);
+                        statusStore.AddLog(
+                            "PostgreSQL binaries downloaded and server started successfully."
+                        );
+
+                        return Results.Ok(new { success = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        statusStore.SetStatus("error", ex.Message);
+                        statusStore.AddLog($"Error during download or startup: {ex.Message}");
+                        return Results.Ok(new { success = false, error = ex.Message });
+                    }
                 }
             );
 
