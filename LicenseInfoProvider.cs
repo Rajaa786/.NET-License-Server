@@ -111,6 +111,15 @@ namespace MyLanService
             }
         }
 
+        /// <summary>
+        /// Loads the license information from an encrypted file on disk.
+        /// Determines the appropriate folder based on the current environment
+        /// (Development or Production). Reads and decrypts the license file,
+        /// then deserializes it into a LicenseInfo object. If any error occurs
+        /// during the process, logs the error and returns a new instance of
+        /// LicenseInfo as a fallback.
+        /// </summary>
+
         private LicenseInfo LoadLicenseInfo()
         {
             try
@@ -140,8 +149,15 @@ namespace MyLanService
                     throw new Exception();
                 }
 
+                // string? decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
+                // return JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
+
                 string? decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
-                return JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
+                var licenseInfo = JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
+
+                // Initialize system up‑time at application start
+                licenseInfo.SystemUpTime = 0;
+                return licenseInfo;
             }
             catch (Exception ex)
             {

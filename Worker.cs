@@ -31,14 +31,12 @@ namespace MyLanService
 
         private HttpApiHost _httpApiHost;
 
-
         public Worker(
             ILogger<Worker> logger,
             LicenseHelper licenseHelper,
             LicenseStateManager licenseStateManager,
             LicenseInfoProvider licenseInfoProvider,
             IConfiguration configuration
-
         )
             : base()
         {
@@ -59,29 +57,30 @@ namespace MyLanService
             //     : AppContext.BaseDirectory;
             try
             {
+                // Initialize mDNS components first
+                await WaitForNetworkAsync(10, 3000, stoppingToken);
+                var localIP = GetLocalIPAddress();
+
+                // Use the constructor with a filter to select only the matching NIC
+                _mdns = new MulticastService();
+                _serviceDiscovery = new ServiceDiscovery(_mdns);
+
                 _httpApiHost = new HttpApiHost(
                     HttpPort,
                     _logger,
                     _licenseStateManager,
                     _licenseInfoProvider,
                     _licenseHelper,
-                    _configuration
-
+                    _configuration,
+                    _serviceDiscovery
                 );
 
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
                 var licensePollingTask = _httpApiHost.StartLicensePollingAsync(stoppingToken);
 
-
                 _logger.LogInformation("HTTP API Server started on port 7890");
 
-                await WaitForNetworkAsync(10, 3000, stoppingToken);
-
-                // Initialize mDNS components.
-                var localIP = GetLocalIPAddress();
-
-                // Use the constructor with a filter to select only the matching NIC
-                _mdns = new MulticastService();
+                // mDNS components already initialized at the beginning
 
                 // foreach (var a in MulticastService.GetIPAddresses())
                 // {
@@ -95,8 +94,6 @@ namespace MyLanService
                 //         _logger.LogInformation($"discovered NIC '{nic.Name}'");
                 //     }
                 // };
-
-                _serviceDiscovery = new ServiceDiscovery(_mdns);
 
                 // Get system hostname and local network IP address.
                 string systemHostname = Dns.GetHostName();
@@ -135,7 +132,11 @@ namespace MyLanService
         }
 
         // Helper method to check if the network is ready.
-        private async Task WaitForNetworkAsync(int maxRetries = 10, int delayMilliseconds = 3000, CancellationToken cancellationToken = default)
+        private async Task WaitForNetworkAsync(
+            int maxRetries = 10,
+            int delayMilliseconds = 3000,
+            CancellationToken cancellationToken = default
+        )
         {
             _logger.LogInformation("Waiting for network to be ready...");
             for (int i = 0; i < maxRetries; i++)
@@ -148,14 +149,15 @@ namespace MyLanService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Network not ready yet (attempt {i + 1}/{maxRetries}): {ex.Message}");
+                    _logger.LogWarning(
+                        $"Network not ready yet (attempt {i + 1}/{maxRetries}): {ex.Message}"
+                    );
                     await Task.Delay(delayMilliseconds * (int)Math.Pow(2, i), cancellationToken);
                 }
             }
 
             throw new Exception("Network did not become ready in time.");
         }
-
 
         // Helper method to retrieve the local IPv4 address.
         private IPAddress GetLocalIPAddress()

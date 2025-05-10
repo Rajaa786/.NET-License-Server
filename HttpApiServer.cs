@@ -1,17 +1,20 @@
 using System.Collections.Concurrent;
 using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Makaretu.Dns;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MyLanService.Middlewares;
 using MyLanService.Utils;
 using Newtonsoft.Json.Linq;
-using System.Text.Json.Serialization;
-using MyLanService.Middlewares;
-
 
 namespace MyLanService
 {
@@ -22,12 +25,14 @@ namespace MyLanService
         private WebApplication _app;
         private readonly LicenseStateManager _licenseStateManager;
         private readonly LicenseInfoProvider _licenseInfoProvider;
+        private readonly ServiceDiscovery _serviceDiscovery;
 
         private readonly LicenseHelper _licenseHelper;
 
         private readonly HttpClient _httpClient;
         private readonly string _djangoBaseUrl;
 
+        public record PortPayload(int Port);
 
         public HttpApiHost(
             int port,
@@ -35,7 +40,8 @@ namespace MyLanService
             LicenseStateManager licenseStateManager,
             LicenseInfoProvider licenseInfoProvider,
             LicenseHelper licenseHelper,
-            IConfiguration configuration
+            IConfiguration configuration,
+            ServiceDiscovery serviceDiscovery
         )
         {
             _port = port;
@@ -54,18 +60,16 @@ namespace MyLanService
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
             _licenseHelper = licenseHelper;
+            _serviceDiscovery = serviceDiscovery;
             // var envBaseUrl = Environment.GetEnvironmentVariable("DJANGO_BASEURL");
             // _djangoBaseUrl = string.IsNullOrWhiteSpace(envBaseUrl)
             //     ? "http://localhost:8000"
             //     : envBaseUrl.Trim();
 
-            _djangoBaseUrl = configuration.GetValue<string>("Django:BaseUrl") ?? "http://localhost:8000";
+            _djangoBaseUrl =
+                configuration.GetValue<string>("Django:BaseUrl") ?? "http://localhost:8000";
 
-
-            _logger.LogInformation(
-                "Django base URL: {DjangoBaseUrl}",
-                _djangoBaseUrl
-            );
+            _logger.LogInformation("Django base URL: {DjangoBaseUrl}", _djangoBaseUrl);
         }
 
         public async Task StartAsync(CancellationToken stoppingToken)
@@ -78,17 +82,19 @@ namespace MyLanService
             var app = builder.Build();
 
             // Register the middleware with its dependencies
-            app.Use(async (context, next) =>
-            {
-                var middleware = new LicenseExpiryMiddleware(
-                    next,
-                    _logger,
-                    _licenseInfoProvider,
-                    async () => await TryResyncLicenseAsync(),
-                    async () => await ReportClockTamperingAsync()
-                );
-                await middleware.InvokeAsync(context);
-            });
+            app.Use(
+                async (context, next) =>
+                {
+                    var middleware = new LicenseExpiryMiddleware(
+                        next,
+                        _logger,
+                        _licenseInfoProvider,
+                        async () => await TryResyncLicenseAsync(),
+                        async () => await ReportClockTamperingAsync()
+                    );
+                    await middleware.InvokeAsync(context);
+                }
+            );
 
             // ✅ Load encrypted license info & init license manager
             var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
@@ -131,6 +137,93 @@ namespace MyLanService
                     """;
 
                     return Results.Content(html, "text/html");
+                }
+            );
+
+            async Task<bool> PingWithRetries(IPAddress gateway, int attempts = 3, int timeout = 500)
+            {
+                var ping = new Ping();
+                for (int i = 0; i < attempts; i++)
+                {
+                    try
+                    {
+                        var reply = await ping.SendPingAsync(gateway, timeout);
+                        _logger.LogInformation("Ping try {Try} → {Status}", i + 1, reply.Status);
+                        if (reply.Status == IPStatus.Success)
+                            return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Ping error on try {Try}", i + 1);
+                    }
+                }
+                return false;
+            }
+
+            // POST /db/test/network
+            // Checks that there’s at least one Up interface and that we can TCP‑connect to localhost:port
+            app.MapPost(
+                "/db/test/network",
+                async (HttpContext ctx) =>
+                {
+                    // 1) Any active non-loopback interface?
+                    bool hasUpInterface = NetworkInterface
+                        .GetAllNetworkInterfaces()
+                        .Any(ni =>
+                            ni.OperationalStatus == OperationalStatus.Up
+                            && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback
+                        );
+                    _logger.LogInformation("Network interface up? {Up}", hasUpInterface);
+
+                    // 2) Pick the IPv4 default gateway only
+                    var ipv4Gateway = NetworkInterface
+                        .GetAllNetworkInterfaces()
+                        .SelectMany(ni => ni.GetIPProperties().GatewayAddresses)
+                        .Select(g => g.Address)
+                        .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+
+                    _logger.LogInformation("IPv4 gateway: {Gateway}", ipv4Gateway);
+
+                    // 3) Ping it with retries
+                    bool canReachGateway = false;
+                    if (hasUpInterface && ipv4Gateway != null)
+                    {
+                        canReachGateway = await PingWithRetries(
+                            ipv4Gateway,
+                            attempts: 3,
+                            timeout: 500
+                        );
+                    }
+                    _logger.LogInformation(
+                        "Gateway reachable after retries? {Reachable}",
+                        canReachGateway
+                    );
+
+                    bool success = hasUpInterface && canReachGateway;
+                    return Results.Ok(new { success });
+                }
+            );
+
+            // POST /db/test/firewall
+            // Attempts to bind a listener on the port — if that succeeds, we assume no firewall blocks it
+            app.MapPost(
+                "/db/test/firewall",
+                async (HttpContext ctx) =>
+                {
+                    var payload = await ctx.Request.ReadFromJsonAsync<PortPayload>();
+                    int port = payload?.Port ?? 5432;
+
+                    try
+                    {
+                        var listener = new TcpListener(IPAddress.Any, port);
+                        listener.Start();
+                        listener.Stop();
+                        return Results.Ok(new { success = true });
+                    }
+                    catch
+                    {
+                        return Results.Ok(new { success = false });
+                    }
                 }
             );
 
@@ -435,9 +528,7 @@ namespace MyLanService
                         var djangoRequest = new HttpRequestMessage
                         {
                             Method = HttpMethod.Post,
-                            RequestUri = new Uri(
-                                $"{_djangoBaseUrl}/api/activate-offline-license/"
-                            ), // Your Django URL
+                            RequestUri = new Uri($"{_djangoBaseUrl}/api/activate-offline-license/"), // Your Django URL
                             Content = requestBody,
                         };
 
@@ -464,17 +555,23 @@ namespace MyLanService
 
                             // var deviceInfo = json["deviceInfo"] as JObject;
 
-                            var currentTimestamp = parsedResult.ContainsKey("current_timestamp") && parsedResult["current_timestamp"] is JsonElement timestampElement
-                                ? timestampElement.GetDouble() // Get the value as a double
+                            var currentTimestamp =
+                                parsedResult.ContainsKey("current_timestamp")
+                                && parsedResult["current_timestamp"] is JsonElement timestampElement
+                                    ? timestampElement.GetDouble() // Get the value as a double
                                     : 0.0; // Default value if not present or invalid
 
-                            var expiryTimestamp = parsedResult.ContainsKey("expiry_timestamp") && parsedResult["expiry_timestamp"] is JsonElement expiryElement
-                                ? expiryElement.GetDouble() // Get the value as a double
-                                : 0.0; // Default value if not present or invalid
+                            var expiryTimestamp =
+                                parsedResult.ContainsKey("expiry_timestamp")
+                                && parsedResult["expiry_timestamp"] is JsonElement expiryElement
+                                    ? expiryElement.GetDouble() // Get the value as a double
+                                    : 0.0; // Default value if not present or invalid
 
-                            var numberOfUsers = parsedResult.ContainsKey("number_of_users") && parsedResult["number_of_users"] is JsonElement usersElement
-                                ? usersElement.GetInt32() // Get the value as an integer
-                                : 0; // Default value if not present or invalid
+                            var numberOfUsers =
+                                parsedResult.ContainsKey("number_of_users")
+                                && parsedResult["number_of_users"] is JsonElement usersElement
+                                    ? usersElement.GetInt32() // Get the value as an integer
+                                    : 0; // Default value if not present or invalid
 
                             // var licenseInfo = new LicenseInfo
                             // {
@@ -500,12 +597,15 @@ namespace MyLanService
                                 CurrentTimestamp = currentTimestamp,
                                 ExpiryTimestamp = expiryTimestamp,
                                 NumberOfUsers = numberOfUsers,
-                                NumberOfStatements = parsedResult.ContainsKey("number_of_statements") && parsedResult["number_of_statements"] is JsonElement statementsElement
-                                ? statementsElement.GetInt32()
-                                : 0, // Default value if not present or invalid
+                                NumberOfStatements =
+                                    parsedResult.ContainsKey("number_of_statements")
+                                    && parsedResult["number_of_statements"]
+                                        is JsonElement statementsElement
+                                        ? statementsElement.GetInt32()
+                                        : 0, // Default value if not present or invalid
                                 Role = parsedResult["role"]?.ToString(),
                                 UsedStatements = 0, // Set used statements as needed
-                                SystemUpTime = Environment.TickCount64
+                                SystemUpTime = Environment.TickCount64,
                             };
 
                             // Serialize enriched response
@@ -584,11 +684,15 @@ namespace MyLanService
 
                             _licenseInfoProvider.SetLicenseInfo(licenseInfo);
                             _licenseStateManager._maxLicenses = licenseInfo.NumberOfUsers;
-                            _licenseStateManager._currentUsedStatements = licenseInfo.UsedStatements;
-                            _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+                            _licenseStateManager._currentUsedStatements =
+                                licenseInfo.UsedStatements;
+                            _licenseStateManager._licenseInfo =
+                                _licenseInfoProvider.GetLicenseInfo();
 
-                            _logger.LogInformation("While Activation License info : {0}", _licenseInfoProvider.GetLicenseInfo());
-
+                            _logger.LogInformation(
+                                "While Activation License info : {0}",
+                                _licenseInfoProvider.GetLicenseInfo()
+                            );
 
                             return Results.Ok(JsonDocument.Parse(enrichedJson).RootElement);
                         }
@@ -628,7 +732,11 @@ namespace MyLanService
             )
             {
                 return Results.BadRequest(
-                    new { error = "Missing or invalid license client information.", errorCode = "invalid-parameters" }
+                    new
+                    {
+                        error = "Missing or invalid license client information.",
+                        errorCode = "invalid-parameters",
+                    }
                 );
             }
 
@@ -653,7 +761,11 @@ namespace MyLanService
             )
             {
                 return Results.Json(
-                    new { error = "License not loaded, corrupted, or invalid.", errorCode = "license-not-loaded" },
+                    new
+                    {
+                        error = "License not loaded, corrupted, or invalid.",
+                        errorCode = "license-not-loaded",
+                    },
                     statusCode: StatusCodes.Status500InternalServerError
                 );
             }
@@ -698,7 +810,8 @@ namespace MyLanService
             {
                 // If all licenses are full and no new license could be assigned,
                 // return the list of inactive licenses (Active == false)
-                IEnumerable<object> inactiveLicenses = _licenseStateManager.GetInactiveLicensesWithKey();
+                IEnumerable<object> inactiveLicenses =
+                    _licenseStateManager.GetInactiveLicensesWithKey();
 
                 if (inactiveLicenses.Any())
                 {
@@ -802,7 +915,7 @@ namespace MyLanService
                     new
                     {
                         error = "Missing or invalid activation parameters.",
-                        errorCode = "invalid-parameters"
+                        errorCode = "invalid-parameters",
                     }
                 );
             }
@@ -849,9 +962,7 @@ namespace MyLanService
                         var djangoRequest = new HttpRequestMessage
                         {
                             Method = HttpMethod.Post,
-                            RequestUri = new Uri(
-                                $"{_djangoBaseUrl}/api/activate-license-session/"
-                            ),
+                            RequestUri = new Uri($"{_djangoBaseUrl}/api/activate-license-session/"),
                             Content = requestBody,
                         };
 
@@ -878,9 +989,14 @@ namespace MyLanService
                     }
                 });
 
-
                 var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
-                var remainingSeconds = (long)Math.Floor(_licenseHelper.GetRemainingLicenseSeconds(licenseInfo, ReportClockTamperingAsync));
+                var remainingSeconds = (long)
+                    Math.Floor(
+                        _licenseHelper.GetRemainingLicenseSeconds(
+                            licenseInfo,
+                            ReportClockTamperingAsync
+                        )
+                    );
 
                 return Results.Ok(
                     new
@@ -1015,7 +1131,6 @@ namespace MyLanService
             }
         }
 
-
         public async Task StartLicensePollingAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Starting license polling...");
@@ -1041,14 +1156,15 @@ namespace MyLanService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError("[License Polling] Error while resyncing license: {0}", ex.Message);
+                    _logger.LogError(
+                        "[License Polling] Error while resyncing license: {0}",
+                        ex.Message
+                    );
                 }
-
 
                 await Task.Delay(checkInterval, stoppingToken);
             }
         }
-
 
         private async Task<bool> ReportClockTamperingAsync()
         {
@@ -1056,11 +1172,7 @@ namespace MyLanService
             {
                 var licenseKey = _licenseInfoProvider.GetLicenseInfo().LicenseKey.Trim();
                 var deviceInfo = _licenseHelper.GetDeviceInfo();
-                var payload = new
-                {
-                    license_key = licenseKey,
-                    device_info = deviceInfo
-                };
+                var payload = new { license_key = licenseKey, device_info = deviceInfo };
 
                 string jsonPayload = JsonSerializer.Serialize(payload);
                 var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
@@ -1077,7 +1189,9 @@ namespace MyLanService
                 else
                 {
                     string errorResponse = await response.Content.ReadAsStringAsync();
-                    _logger.LogError($"Failed to report clock tampering. Status: {response.StatusCode}, Response: {errorResponse}");
+                    _logger.LogError(
+                        $"Failed to report clock tampering. Status: {response.StatusCode}, Response: {errorResponse}"
+                    );
                     return false;
                 }
             }
@@ -1087,7 +1201,6 @@ namespace MyLanService
                 return false;
             }
         }
-
 
         private async Task<bool> TryResyncLicenseAsync(CancellationToken stoppingToken = default)
         {
@@ -1111,7 +1224,6 @@ namespace MyLanService
                 }
 
                 licenseKey = licenseKey.Trim();
-
 
                 // var deviceInfo = _licenseHelper.GetDeviceInfo();
 
@@ -1140,8 +1252,14 @@ namespace MyLanService
 
                     _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
 
-                    _logger.LogInformation("[License Polling] LicenseInfo: {0}", _licenseStateManager._licenseInfo.ToString());
-                    _logger.LogInformation("[License Polling] LicenseInfo: {0}", _licenseInfoProvider.GetLicenseInfo().ToString());
+                    _logger.LogInformation(
+                        "[License Polling] LicenseInfo: {0}",
+                        _licenseStateManager._licenseInfo.ToString()
+                    );
+                    _logger.LogInformation(
+                        "[License Polling] LicenseInfo: {0}",
+                        _licenseInfoProvider.GetLicenseInfo().ToString()
+                    );
 
                     return true;
                 }
@@ -1150,7 +1268,6 @@ namespace MyLanService
                     _logger.LogWarning($"[License Polling] Status: {response.StatusCode}");
                     return false;
                 }
-
             }
             catch (Exception ex)
             {
@@ -1158,7 +1275,6 @@ namespace MyLanService
                 return false;
             }
         }
-
 
         private class LicenseStatusResponse
         {
@@ -1171,7 +1287,6 @@ namespace MyLanService
             [JsonPropertyName("current_timestamp")]
             public double CurrentTimestamp { get; set; }
         }
-
 
         private async Task<IResult> HandleAllLicenseStatus()
         {
