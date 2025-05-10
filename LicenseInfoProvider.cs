@@ -156,7 +156,7 @@ namespace MyLanService
                 var licenseInfo = JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
 
                 // Initialize system up‑time at application start
-                licenseInfo.SystemUpTime = 0;
+                licenseInfo.SystemUpTime = Environment.TickCount64;
                 return licenseInfo;
             }
             catch (Exception ex)

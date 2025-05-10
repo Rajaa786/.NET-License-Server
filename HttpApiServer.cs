@@ -1139,7 +1139,7 @@ namespace MyLanService
 
         private async Task PollLicenseStatusAsync(CancellationToken stoppingToken)
         {
-            var checkInterval = TimeSpan.FromSeconds(30);
+            var checkInterval = TimeSpan.FromSeconds(3600);
 
             while (!stoppingToken.IsCancellationRequested)
             {

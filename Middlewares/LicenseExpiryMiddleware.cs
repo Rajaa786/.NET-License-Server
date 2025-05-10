@@ -61,6 +61,7 @@ namespace MyLanService.Middlewares
                 // Check if the license is valid
                 if (licenseInfo == null || !licenseInfo.IsValid())
                 {
+                    _logger.LogInformation("License is Null or not Valid");
                     context.Response.StatusCode = 403; // Forbidden
                     await context.Response.WriteAsync("License is invalid or not found.");
                     return;
@@ -70,7 +71,7 @@ namespace MyLanService.Middlewares
                 var tickNow = Environment.TickCount64;
                 var ticksSinceLastSync = tickNow - licenseInfo.SystemUpTime;
 
-                if (ticksSinceLastSync > TimeSpan.FromMinutes(1).TotalMilliseconds)
+                if (ticksSinceLastSync > TimeSpan.FromMinutes(120).TotalMilliseconds)
                 {
                     _logger.LogWarning(
                         "⏳ More than 2 hours since last sync. Attempting to re-sync..."
@@ -95,7 +96,7 @@ namespace MyLanService.Middlewares
                 var licenseExpiryTimestamp = licenseInfo.ExpiryTimestamp;
 
                 // 🛡️ Clock tampering check: system time is behind license time
-                if (Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
+                if (systemCurrentTimestamp < licenseGeneratedTimestamp && Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
                 {
                     _logger.LogWarning(
                         "⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",

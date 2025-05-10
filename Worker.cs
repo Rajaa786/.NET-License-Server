@@ -80,20 +80,57 @@ namespace MyLanService
 
                 _logger.LogInformation("HTTP API Server started on port 7890");
 
-                // mDNS components already initialized at the beginning
-
-                // foreach (var a in MulticastService.GetIPAddresses())
+                // _mdns.QueryReceived += (s, e) =>
                 // {
-                //     _logger.LogInformation($"Got MDNS IP address {a}");
-                // }
+                //     var names = e.Message.Questions.Select(q => q.Name + " " + q.Type);
+                //     Console.WriteLine($"got a query for {String.Join(", ", names)}");
+                // };
+
+                // _mdns.AnswerReceived += (s, e) =>
+                // {
+                //     var names = e.Message.Answers
+                //         .Select(q => q.Name + " " + q.Type)
+                //         .Distinct();
+                //     Console.WriteLine($"got answer for {String.Join(", ", names)}");
+                // };
+
+                _mdns.QueryReceived += (s, e) =>
+                {
+                    var relevantQueries = e
+                        .Message.Questions.Where(q =>
+                            q.Name == "_license-server._tcp.local" && q.Type == DnsType.PTR
+                        )
+                        .Select(q => $"{q.Name} {q.Type}");
+
+                    foreach (var query in relevantQueries)
+                    {
+                        _logger.LogInformation($"got query for {query}");
+                    }
+                };
+
+                _mdns.AnswerReceived += (s, e) =>
+                {
+                    var relevantAnswers = e
+                        .Message.Answers.Where(ans =>
+                            ans.Name == "_license-server._tcp.local" && ans.Type == DnsType.PTR
+                        )
+                        .Select(ans => $"{ans.Name} {ans.Type}")
+                        .Distinct();
+
+                    foreach (var answer in relevantAnswers)
+                    {
+                        _logger.LogInformation($"got answer for {answer}");
+                    }
+                };
 
                 // _mdns.NetworkInterfaceDiscovered += (s, e) =>
                 // {
                 //     foreach (var nic in e.NetworkInterfaces)
                 //     {
-                //         _logger.LogInformation($"discovered NIC '{nic.Name}'");
+                //         Console.WriteLine($"discovered NIC '{nic.Name}'");
                 //     }
                 // };
+
 
                 // Get system hostname and local network IP address.
                 string systemHostname = Dns.GetHostName();
@@ -234,7 +271,9 @@ namespace MyLanService
 
                 if (_mdns is not null)
                 {
+                    _logger.LogInformation("Stopping mDNS service...");
                     _mdns.Stop();
+                    _logger.LogInformation("mDNS service stopped.");
                     _mdns.Dispose();
                 }
                 _licenseStateManager?.Flush();

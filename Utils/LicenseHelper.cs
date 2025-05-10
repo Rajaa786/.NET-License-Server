@@ -343,7 +343,7 @@ namespace MyLanService.Utils
             double effectiveCurrentTimestamp;
 
             // 🛡️ Clock tampering check
-            if (Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
+            if (systemCurrentTimestamp < licenseGeneratedTimestamp && Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
             {
                 _logger?.LogWarning("⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
                     systemCurrentTimestamp, licenseGeneratedTimestamp);
