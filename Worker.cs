@@ -154,6 +154,29 @@ namespace MyLanService
                     $"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}"
                 );
 
+                _ = Task.Run(
+                    async () =>
+                    {
+                        while (!stoppingToken.IsCancellationRequested)
+                        {
+                            try
+                            {
+                                _logger.LogInformation("Re-advertising mDNS service...");
+                                _serviceDiscovery.Advertise(serviceProfile);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(
+                                    $"Failed to re-advertise mDNS service: {ex.Message}"
+                                );
+                            }
+
+                            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); // re-advertise every 60 seconds
+                        }
+                    },
+                    stoppingToken
+                );
+
                 await Task.WhenAll(licensePollingTask, httpTask);
             }
             catch (Exception ex)
