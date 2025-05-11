@@ -174,6 +174,7 @@ namespace MyLanService.Utils
             {
                 _logger.LogInformation($"Writing license file to {filePath}");
                 File.WriteAllBytes(filePath, bytes);
+                _logger.LogInformation($"Wrote license file to {filePath}");
             }
             catch (Exception ex)
             {

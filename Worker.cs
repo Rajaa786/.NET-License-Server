@@ -145,6 +145,7 @@ namespace MyLanService
                 );
 
                 serviceProfile.AddProperty("description", "My TCP Server Service");
+                serviceProfile.AddProperty("ttl", "300");
 
                 // Advertise the service via mDNS.
                 _serviceDiscovery.Advertise(serviceProfile);
