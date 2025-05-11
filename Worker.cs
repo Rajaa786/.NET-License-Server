@@ -51,7 +51,7 @@ namespace MyLanService
             _licenseHelper = licenseHelper;
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
-            _udpListener = new UdpClient(UdpPort);
+            _udpListener = new UdpClient(new IPEndPoint(IPAddress.Any, UdpPort));
             _configuration = configuration;
             _logger.LogInformation("Worker initialized.");
         }
