@@ -4,6 +4,8 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Makaretu.Dns;
@@ -22,6 +24,11 @@ namespace MyLanService
 
         private const int TcpPort = 5000;
         private const int HttpPort = 7890;
+
+        private const int UdpPort = 41234;
+        private UdpClient _udpListener;
+        private Task _udpListeningTask;
+
         private MulticastService _mdns;
         private ServiceDiscovery _serviceDiscovery;
         private readonly LicenseHelper _licenseHelper;
@@ -44,6 +51,7 @@ namespace MyLanService
             _licenseHelper = licenseHelper;
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
+            _udpListener = new UdpClient(UdpPort);
             _configuration = configuration;
             _logger.LogInformation("Worker initialized.");
         }
@@ -77,8 +85,13 @@ namespace MyLanService
 
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
                 var licensePollingTask = _httpApiHost.StartLicensePollingAsync(stoppingToken);
-
                 _logger.LogInformation("HTTP API Server started on port 7890");
+
+                _udpListeningTask = Task.Run(
+                    () => ListenForUdpBroadcastsAsync(stoppingToken),
+                    stoppingToken
+                );
+                _logger.LogInformation($"UDP broadcast listener started on port {UdpPort}.");
 
                 // _mdns.QueryReceived += (s, e) =>
                 // {
@@ -189,6 +202,58 @@ namespace MyLanService
                 _serviceDiscovery?.Dispose();
                 _mdns?.Stop();
                 _mdns?.Dispose();
+            }
+        }
+
+        private async Task ListenForUdpBroadcastsAsync(CancellationToken stoppingToken)
+        {
+            IPEndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
+
+            try
+            {
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    UdpReceiveResult received = await _udpListener.ReceiveAsync();
+                    string message = Encoding.UTF8.GetString(received.Buffer);
+
+                    Console.WriteLine(
+                        $"UDP broadcast received from {received.RemoteEndPoint}: {message}"
+                    );
+
+                    // Example check for a discovery query
+                    if (message.Trim() == "DISCOVER_LICENSE_SERVER")
+                    {
+                        var ipAddress = (
+                            _udpListener.Client.LocalEndPoint as IPEndPoint
+                        )?.Address.ToString();
+
+                        var responseObj = new
+                        {
+                            name = "LicenseServer",
+                            host = Dns.GetHostName(),
+                            ip = ipAddress,
+                            port = HttpPort,
+                        };
+
+                        string response = JsonSerializer.Serialize(responseObj);
+                        byte[] responseBytes = Encoding.UTF8.GetBytes(response);
+                        await _udpListener.SendAsync(
+                            responseBytes,
+                            responseBytes.Length,
+                            received.RemoteEndPoint
+                        );
+
+                        Console.WriteLine($"Responded to UDP discovery with: {response}");
+                    }
+                }
+            }
+            catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Listener was closed as part of shutdown, ignore.
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error in UDP listener");
             }
         }
 
