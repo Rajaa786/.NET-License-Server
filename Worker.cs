@@ -216,7 +216,7 @@ namespace MyLanService
                     UdpReceiveResult received = await _udpListener.ReceiveAsync();
                     string message = Encoding.UTF8.GetString(received.Buffer);
 
-                    Console.WriteLine(
+                    _logger.LogInformation(
                         $"UDP broadcast received from {received.RemoteEndPoint}: {message}"
                     );
 
@@ -243,7 +243,7 @@ namespace MyLanService
                             received.RemoteEndPoint
                         );
 
-                        Console.WriteLine($"Responded to UDP discovery with: {response}");
+                        _logger.LogInformation($"Responded to UDP discovery with: {response}");
                     }
                 }
             }
@@ -253,7 +253,7 @@ namespace MyLanService
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error in UDP listener");
+                _logger.LogError(ex, "Error in UDP listener");
             }
         }
 

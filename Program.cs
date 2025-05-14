@@ -1,21 +1,22 @@
+using System.IO; // Add this for Path operations
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Configuration;
-using Serilog;
-using Serilog.Sinks.File;
-using Serilog.Settings.Configuration;
 using MyLanService;
-using MyLanService.Utils;
 using MyLanService.Middlewares;
-using System.IO; // Add this for Path operations
+using MyLanService.Utils;
+using Serilog;
+using Serilog.Settings.Configuration;
+using Serilog.Sinks.File;
 
+// <CETCompat>false</CETCompat>
 
 // Determine environment and set appropriate log directory
 var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
 string logBaseDir = environment.Equals("Development", StringComparison.OrdinalIgnoreCase)
-    ? Directory.GetCurrentDirectory()  // Use project directory in development
-    : AppContext.BaseDirectory;       // Use executable directory in production
+    ? Directory.GetCurrentDirectory() // Use project directory in development
+    : AppContext.BaseDirectory; // Use executable directory in production
 
 var logPath = Path.Combine(logBaseDir, "logs", "gateway", "gateway_.txt");
 var logDir = Path.GetDirectoryName(logPath);
@@ -46,7 +47,6 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .CreateLogger();
 
-
 try
 {
     Log.Information("Starting service...");
@@ -54,17 +54,22 @@ try
 
     var builder = Host.CreateDefaultBuilder(args)
         .UseSerilog()
-        .ConfigureServices((hostContext, services) =>
-        {
-            Log.Information(">>> ENVIRONMENT: {Env}", hostContext.HostingEnvironment.EnvironmentName);
+        .ConfigureServices(
+            (hostContext, services) =>
+            {
+                Log.Information(
+                    ">>> ENVIRONMENT: {Env}",
+                    hostContext.HostingEnvironment.EnvironmentName
+                );
 
-            services.AddSingleton<LicenseHelper>();
-            services.AddSingleton<LicenseInfoProvider>();
-            services.AddSingleton<LicenseStateManager>();
-            services.AddSingleton<PathUtility>();
-            services.AddSingleton<EncryptionUtility>();
-            services.AddHostedService<Worker>();
-        });
+                services.AddSingleton<LicenseHelper>();
+                services.AddSingleton<LicenseInfoProvider>();
+                services.AddSingleton<LicenseStateManager>();
+                services.AddSingleton<PathUtility>();
+                services.AddSingleton<EncryptionUtility>();
+                services.AddHostedService<Worker>();
+            }
+        );
 
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
     {
