@@ -16,9 +16,25 @@ using MyLanService.Middlewares;
 using MyLanService.Utils;
 using MysticMind.PostgresEmbed;
 using Newtonsoft.Json.Linq;
+using Npgsql;
 
 namespace MyLanService
 {
+    public record DbConnectionRequest
+    {
+        [JsonPropertyName("host")]
+        public string Host { get; set; }
+
+        [JsonPropertyName("port")]
+        public int Port { get; set; }
+
+        [JsonPropertyName("user")]
+        public string User { get; set; }
+
+        [JsonPropertyName("password")]
+        public string Password { get; set; }
+    }
+
     public class HttpApiHost
     {
         private readonly int _port;
@@ -279,6 +295,53 @@ namespace MyLanService
                     catch
                     {
                         return Results.Ok(new { success = false });
+                    }
+                }
+            );
+
+            app.MapPost(
+                "/db/validate",
+                async (HttpContext context) =>
+                {
+                    try
+                    {
+                        var requestBody =
+                            await JsonSerializer.DeserializeAsync<DbConnectionRequest>(
+                                context.Request.Body
+                            );
+
+                        _logger.LogInformation("Request body: {RequestBody}", requestBody);
+
+                        if (
+                            requestBody == null
+                            || string.IsNullOrWhiteSpace(requestBody.Host)
+                            || requestBody.Port == 0
+                        )
+                        {
+                            return Results.BadRequest(
+                                new { success = false, error = "Invalid connection details." }
+                            );
+                        }
+
+                        // var connectionString =
+                        //     $"Host={requestBody.Host};Port={requestBody.Port};Username={requestBody.User};Password={requestBody.Password};Database=postgres;Timeout=5;";
+
+                        var connectionString =
+                            "Host=localhost;Port=5432;Username=postgres;Password=postgres";
+
+                        _logger.LogInformation("Validating database connection.");
+
+                        using var connection = new NpgsqlConnection(connectionString);
+                        await connection.OpenAsync();
+
+                        _logger.LogInformation("Database connection validated.");
+
+                        return Results.Ok(new { success = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error validating database connection.");
+                        return Results.Ok(new { success = false, error = ex.Message });
                     }
                 }
             );

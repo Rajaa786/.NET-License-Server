@@ -48,6 +48,7 @@ namespace MyLanService.Middlewares
                     "/db/provision/download",
                     "/db/provision/download",
                     "/db/provision/status",
+                    "/db/validate",
                 };
 
                 // Skip license check for excluded endpoints
