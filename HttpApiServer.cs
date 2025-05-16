@@ -194,9 +194,9 @@ namespace MyLanService
 
                         _logger.LogInformation("Data directory: {DataDir}", dataDir);
 
-                        // var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
+                        // using var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
                         // await server.StartAsync();
-                        pgMgr.StartAsync("15.3.0", dataDir, 5432);
+                        // pgMgr.StartAsync("15.3.0", dataDir, 5432);
 
                         statusStore.SetStatus("completed", null, 100);
                         statusStore.AddLog(

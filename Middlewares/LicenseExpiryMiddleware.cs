@@ -46,7 +46,6 @@ namespace MyLanService.Middlewares
                     "/db/test/firewall",
                     "/db/test/network",
                     "/db/provision/download",
-                    "/db/provision/download",
                     "/db/provision/status",
                     "/db/validate",
                 };
@@ -100,7 +99,10 @@ namespace MyLanService.Middlewares
                 var licenseExpiryTimestamp = licenseInfo.ExpiryTimestamp;
 
                 // 🛡️ Clock tampering check: system time is behind license time
-                if (systemCurrentTimestamp < licenseGeneratedTimestamp && Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
+                if (
+                    systemCurrentTimestamp < licenseGeneratedTimestamp
+                    && Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600
+                )
                 {
                     _logger.LogWarning(
                         "⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
