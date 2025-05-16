@@ -76,7 +76,6 @@ try
                 services.AddSingleton<LicenseStateManager>();
                 services.AddSingleton<PathUtility>();
                 services.AddSingleton<EncryptionUtility>();
-                services.AddSingleton<EmbeddedPostgresManager>();
                 services.AddHostedService<Worker>();
             }
         );

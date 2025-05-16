@@ -96,7 +96,7 @@ namespace MyLanService
             var builder = WebApplication.CreateBuilder();
 
             builder.Services.AddSingleton<ProvisionStatusStore>();
-
+            builder.Services.AddSingleton<EmbeddedPostgresManager>();
             builder.Services.AddControllers().AddNewtonsoftJson();
 
             var app = builder.Build();
@@ -216,7 +216,7 @@ namespace MyLanService
 
             app.MapGet(
                 "/db/validate",
-                async ([FromServices] EmbeddedPostgresManager pgMgr) =>
+                async (EmbeddedPostgresManager pgMgr) =>
                 {
                     if (!pgMgr.IsRunning)
                     {
