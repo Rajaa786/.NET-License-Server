@@ -3,7 +3,7 @@ using Npgsql;
 
 namespace MyLanService
 {
-    public class EmbeddedPostgresManager
+    public class EmbeddedPostgresManager : IAsyncDisposable
     {
         readonly ILogger<EmbeddedPostgresManager> _logger;
         PgServer _server;
@@ -30,7 +30,9 @@ namespace MyLanService
 
         public void Stop()
         {
+            _logger.LogInformation("Stopping embedded Postgres…");
             _server?.Stop();
+            _logger.LogInformation("Embedded Postgres has been stopped.");
             _server = null;
         }
 
@@ -51,6 +53,11 @@ namespace MyLanService
                 Password = password,
                 Database = database,
             }.ToString();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Stop();
         }
     }
 }

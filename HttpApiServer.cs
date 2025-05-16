@@ -194,9 +194,9 @@ namespace MyLanService
 
                         _logger.LogInformation("Data directory: {DataDir}", dataDir);
 
-                        // using var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
+                        // var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
                         // await server.StartAsync();
-                        await pgMgr.StartAsync("15.3.0", dataDir, 5432);
+                        pgMgr.StartAsync("15.3.0", dataDir, 5432);
 
                         statusStore.SetStatus("completed", null, 100);
                         statusStore.AddLog(
@@ -1277,6 +1277,7 @@ namespace MyLanService
             {
                 _logger.LogInformation("Stopping HTTP API server...");
                 await _app.StopAsync(cancellationToken);
+
                 // No need to call _app.Dispose();
             }
         }
