@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using Makaretu.Dns;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MyLanService.Middlewares;
@@ -180,7 +181,7 @@ namespace MyLanService
 
             app.MapPost(
                 "/db/provision/download",
-                async (ProvisionStatusStore statusStore) =>
+                async (EmbeddedPostgresManager pgMgr, ProvisionStatusStore statusStore) =>
                 {
                     statusStore.Reset();
                     statusStore.SetStatus("starting");
@@ -193,8 +194,9 @@ namespace MyLanService
 
                         _logger.LogInformation("Data directory: {DataDir}", dataDir);
 
-                        using var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
-                        await server.StartAsync();
+                        // using var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
+                        // await server.StartAsync();
+                        await pgMgr.StartAsync("15.3.0", dataDir, 5432);
 
                         statusStore.SetStatus("completed", null, 100);
                         statusStore.AddLog(
@@ -207,6 +209,35 @@ namespace MyLanService
                     {
                         statusStore.SetStatus("error", ex.Message);
                         statusStore.AddLog($"Error during download or startup: {ex.Message}");
+                        return Results.Ok(new { success = false, error = ex.Message });
+                    }
+                }
+            );
+
+            app.MapGet(
+                "/db/validate",
+                async ([FromServices] EmbeddedPostgresManager pgMgr) =>
+                {
+                    if (!pgMgr.IsRunning)
+                    {
+                        _logger.LogInformation("Postgres is not running.");
+                        return Results.BadRequest(
+                            new { success = false, error = "Postgres not started" }
+                        );
+                    }
+
+                    try
+                    {
+                        var cs = pgMgr.GetConnectionString("postgres", "postgres", "postgres");
+                        await using var conn = new NpgsqlConnection(cs);
+                        await conn.OpenAsync();
+                        await using var cmd = new NpgsqlCommand("SELECT 1", conn);
+                        var result = (int?)await cmd.ExecuteScalarAsync();
+
+                        return Results.Ok(new { success = result == 1 });
+                    }
+                    catch (Exception ex)
+                    {
                         return Results.Ok(new { success = false, error = ex.Message });
                     }
                 }
@@ -299,52 +330,52 @@ namespace MyLanService
                 }
             );
 
-            app.MapPost(
-                "/db/validate",
-                async (HttpContext context) =>
-                {
-                    try
-                    {
-                        var requestBody =
-                            await JsonSerializer.DeserializeAsync<DbConnectionRequest>(
-                                context.Request.Body
-                            );
+            // app.MapPost(
+            //     "/db/validate",
+            //     async (HttpContext context) =>
+            //     {
+            //         try
+            //         {
+            //             var requestBody =
+            //                 await JsonSerializer.DeserializeAsync<DbConnectionRequest>(
+            //                     context.Request.Body
+            //                 );
 
-                        _logger.LogInformation("Request body: {RequestBody}", requestBody);
+            //             _logger.LogInformation("Request body: {RequestBody}", requestBody);
 
-                        if (
-                            requestBody == null
-                            || string.IsNullOrWhiteSpace(requestBody.Host)
-                            || requestBody.Port == 0
-                        )
-                        {
-                            return Results.BadRequest(
-                                new { success = false, error = "Invalid connection details." }
-                            );
-                        }
+            //             if (
+            //                 requestBody == null
+            //                 || string.IsNullOrWhiteSpace(requestBody.Host)
+            //                 || requestBody.Port == 0
+            //             )
+            //             {
+            //                 return Results.BadRequest(
+            //                     new { success = false, error = "Invalid connection details." }
+            //                 );
+            //             }
 
-                        // var connectionString =
-                        //     $"Host={requestBody.Host};Port={requestBody.Port};Username={requestBody.User};Password={requestBody.Password};Database=postgres;Timeout=5;";
+            //             // var connectionString =
+            //             //     $"Host={requestBody.Host};Port={requestBody.Port};Username={requestBody.User};Password={requestBody.Password};Database=postgres;Timeout=5;";
 
-                        var connectionString =
-                            "Host=localhost;Port=5432;Username=postgres;Password=postgres";
+            //             var connectionString =
+            //                 "Host=localhost;Port=5432;Username=postgres;Password=postgres";
 
-                        _logger.LogInformation("Validating database connection.");
+            //             _logger.LogInformation("Validating database connection.");
 
-                        using var connection = new NpgsqlConnection(connectionString);
-                        await connection.OpenAsync();
+            //             using var connection = new NpgsqlConnection(connectionString);
+            //             await connection.OpenAsync();
 
-                        _logger.LogInformation("Database connection validated.");
+            //             _logger.LogInformation("Database connection validated.");
 
-                        return Results.Ok(new { success = true });
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error validating database connection.");
-                        return Results.Ok(new { success = false, error = ex.Message });
-                    }
-                }
-            );
+            //             return Results.Ok(new { success = true });
+            //         }
+            //         catch (Exception ex)
+            //         {
+            //             _logger.LogError(ex, "Error validating database connection.");
+            //             return Results.Ok(new { success = false, error = ex.Message });
+            //         }
+            //     }
+            // );
 
             app.MapPost(
                 "/api/license/assign",
