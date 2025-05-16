@@ -10,6 +10,8 @@ using Serilog;
 using Serilog.Settings.Configuration;
 using Serilog.Sinks.File;
 
+// <CETCompat>false</CETCompat>
+
 // Determine environment and set appropriate log directory
 var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
 string logBaseDir = environment.Equals("Development", StringComparison.OrdinalIgnoreCase)
