@@ -1490,6 +1490,7 @@ namespace MyLanService
                     _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
                     _licenseInfoProvider.SetServerCurrentTime(result.CurrentTimestamp);
                     _licenseInfoProvider.SetSystemUpTime(Environment.TickCount64);
+                    // _licenseInfoProvider.SetNumberOfStatements = result.NumStatements;
 
                     _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
 
@@ -1527,6 +1528,9 @@ namespace MyLanService
 
             [JsonPropertyName("current_timestamp")]
             public double CurrentTimestamp { get; set; }
+
+            [JsonPropertyName("num_statements")]
+            public int NumStatements { get; set; }
         }
 
         private async Task<IResult> HandleAllLicenseStatus()

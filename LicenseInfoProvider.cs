@@ -71,17 +71,20 @@ namespace MyLanService
 
         public void SetLicenseInfo(LicenseInfo licenseInfo) => _licenseInfo = licenseInfo;
 
-
         public void SetExpiry(double expiryTimestamp)
         {
             if (_licenseInfo != null && !string.IsNullOrWhiteSpace(_licenseInfo.LicenseKey))
             {
-                _logger.LogInformation($"[SetExpiry] Updating license expiry from {_licenseInfo.ExpiryTimestamp} to {expiryTimestamp}");
+                _logger.LogInformation(
+                    $"[SetExpiry] Updating license expiry from {_licenseInfo.ExpiryTimestamp} to {expiryTimestamp}"
+                );
                 _licenseInfo.ExpiryTimestamp = expiryTimestamp;
             }
             else
             {
-                _logger.LogWarning("[SetExpiry] Cannot update expiry, LicenseInfo is not initialized or invalid.");
+                _logger.LogWarning(
+                    "[SetExpiry] Cannot update expiry, LicenseInfo is not initialized or invalid."
+                );
             }
         }
 
@@ -89,12 +92,16 @@ namespace MyLanService
         {
             if (_licenseInfo != null && !string.IsNullOrWhiteSpace(_licenseInfo.LicenseKey))
             {
-                _logger.LogInformation($"[SetServerCurrentTime] Updating license current time from {_licenseInfo.CurrentTimestamp} to {currentTime}");
+                _logger.LogInformation(
+                    $"[SetServerCurrentTime] Updating license current time from {_licenseInfo.CurrentTimestamp} to {currentTime}"
+                );
                 _licenseInfo.CurrentTimestamp = currentTime;
             }
             else
             {
-                _logger.LogWarning("[SetServerCurrentTime] Cannot update current time, LicenseInfo is not initialized or invalid.");
+                _logger.LogWarning(
+                    "[SetServerCurrentTime] Cannot update current time, LicenseInfo is not initialized or invalid."
+                );
             }
         }
 
@@ -102,12 +109,16 @@ namespace MyLanService
         {
             if (_licenseInfo != null && !string.IsNullOrWhiteSpace(_licenseInfo.LicenseKey))
             {
-                _logger.LogInformation($"[SetSystemUpTime] Updating license system up time from {_licenseInfo.SystemUpTime} to {systemUpTime}");
+                _logger.LogInformation(
+                    $"[SetSystemUpTime] Updating license system up time from {_licenseInfo.SystemUpTime} to {systemUpTime}"
+                );
                 _licenseInfo.SystemUpTime = systemUpTime;
             }
             else
             {
-                _logger.LogWarning("[SetSystemUpTime] Cannot update system up time, LicenseInfo is not initialized or invalid.");
+                _logger.LogWarning(
+                    "[SetSystemUpTime] Cannot update system up time, LicenseInfo is not initialized or invalid."
+                );
             }
         }
 
@@ -153,7 +164,8 @@ namespace MyLanService
                 // return JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
 
                 string? decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
-                var licenseInfo = JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
+                var licenseInfo =
+                    JsonSerializer.Deserialize<LicenseInfo>(decryptedJson) ?? new LicenseInfo();
 
                 // Initialize system up‑time at application start
                 licenseInfo.SystemUpTime = Environment.TickCount64;
