@@ -8,21 +8,33 @@ namespace MyLanService
         readonly ILogger<EmbeddedPostgresManager> _logger;
         PgServer _server;
 
-        public bool IsRunning => _server != null;
+        public bool IsRunning()
+        {
+            if (_server != null)
+            {
+                _logger.LogInformation("Postgres is running... {server}", _server);
+                return true;
+            }
+            else
+            {
+                _logger.LogInformation("Postgres is not running");
+                return false;
+            }
+        }
 
         public EmbeddedPostgresManager(ILogger<EmbeddedPostgresManager> logger)
         {
             _logger = logger;
         }
 
-        public async Task StartAsync(string version, string dbDir, int port)
+        public async Task StartAsync(string version, string dbDir, int port, Guid InstanceId)
         {
             if (_server != null)
                 return;
 
             _logger.LogInformation("Starting embedded Postgres…");
 
-            _server = new PgServer(version, dbDir: dbDir, port: port);
+            _server = new PgServer(version, dbDir: dbDir, port: port, instanceId: InstanceId);
             await _server.StartAsync();
 
             _logger.LogInformation("Embedded Postgres is now running on port {Port}", port);

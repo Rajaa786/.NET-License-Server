@@ -1,9 +1,11 @@
 using System.IO; // Add this for Path operations
 using System.Runtime.InteropServices;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MyLanService;
+using MyLanService.Database;
 using MyLanService.Middlewares;
 using MyLanService.Utils;
 using Serilog;
@@ -76,6 +78,31 @@ try
                 services.AddSingleton<LicenseStateManager>();
                 services.AddSingleton<PathUtility>();
                 services.AddSingleton<EncryptionUtility>();
+                services.AddSingleton<EmbeddedPostgresManager>();
+                services.AddSingleton<DatabaseManager>();
+                services.AddDbContext<ApplicationDbContext>(
+                    (sp, options) =>
+                    {
+                        var pgManager = sp.GetRequiredService<EmbeddedPostgresManager>();
+                        var conn = pgManager.GetConnectionString(
+                            database: "postgres",
+                            username: "postgres",
+                            password: "password",
+                            host: "localhost",
+                            port: 5432
+                        );
+                        options.UseNpgsql(
+                            conn,
+                            npgsqlOpts =>
+                            {
+                                // ensure EF knows where your migrations live
+                                npgsqlOpts.MigrationsAssembly(
+                                    typeof(ApplicationDbContext).Assembly.FullName
+                                );
+                            }
+                        );
+                    }
+                );
                 services.AddHostedService<Worker>();
             }
         );

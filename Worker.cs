@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Makaretu.Dns;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using MyLanService.Database;
 using MyLanService.Utils;
 
 namespace MyLanService
@@ -37,13 +38,17 @@ namespace MyLanService
         private readonly IConfiguration _configuration;
 
         private HttpApiHost _httpApiHost;
+        private EmbeddedPostgresManager _postgresManager;
+        private DatabaseManager _dbManager;
 
         public Worker(
             ILogger<Worker> logger,
             LicenseHelper licenseHelper,
             LicenseStateManager licenseStateManager,
             LicenseInfoProvider licenseInfoProvider,
-            IConfiguration configuration
+            IConfiguration configuration,
+            EmbeddedPostgresManager postgresManager,
+            DatabaseManager dbManager
         )
             : base()
         {
@@ -53,6 +58,8 @@ namespace MyLanService
             _licenseInfoProvider = licenseInfoProvider;
             _udpListener = new UdpClient(new IPEndPoint(IPAddress.Any, UdpPort));
             _configuration = configuration;
+            _postgresManager = postgresManager;
+            _dbManager = dbManager;
             _logger.LogInformation("Worker initialized.");
         }
 
@@ -80,7 +87,9 @@ namespace MyLanService
                     _licenseInfoProvider,
                     _licenseHelper,
                     _configuration,
-                    _serviceDiscovery
+                    _serviceDiscovery,
+                    _postgresManager,
+                    _dbManager
                 );
 
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);

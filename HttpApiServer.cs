@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MyLanService.Database;
 using MyLanService.Middlewares;
 using MyLanService.Utils;
 using MysticMind.PostgresEmbed;
@@ -45,12 +46,17 @@ namespace MyLanService
         private readonly LicenseInfoProvider _licenseInfoProvider;
         private readonly ServiceDiscovery _serviceDiscovery;
 
+        static readonly Guid InstanceId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
         private readonly LicenseHelper _licenseHelper;
 
         private readonly HttpClient _httpClient;
         private readonly string _djangoBaseUrl;
 
         public record PortPayload(int Port);
+
+        private readonly EmbeddedPostgresManager _postgresManager;
+        private readonly DatabaseManager _dbManager;
 
         public HttpApiHost(
             int port,
@@ -59,7 +65,9 @@ namespace MyLanService
             LicenseInfoProvider licenseInfoProvider,
             LicenseHelper licenseHelper,
             IConfiguration configuration,
-            ServiceDiscovery serviceDiscovery
+            ServiceDiscovery serviceDiscovery,
+            EmbeddedPostgresManager postgresManager,
+            DatabaseManager dbManager
         )
         {
             _port = port;
@@ -79,6 +87,8 @@ namespace MyLanService
             _licenseInfoProvider = licenseInfoProvider;
             _licenseHelper = licenseHelper;
             _serviceDiscovery = serviceDiscovery;
+            _postgresManager = postgresManager;
+            _dbManager = dbManager;
             // var envBaseUrl = Environment.GetEnvironmentVariable("DJANGO_BASEURL");
             // _djangoBaseUrl = string.IsNullOrWhiteSpace(envBaseUrl)
             //     ? "http://localhost:8000"
@@ -96,7 +106,6 @@ namespace MyLanService
             var builder = WebApplication.CreateBuilder();
 
             builder.Services.AddSingleton<ProvisionStatusStore>();
-            builder.Services.AddSingleton<EmbeddedPostgresManager>();
             builder.Services.AddControllers().AddNewtonsoftJson();
 
             var app = builder.Build();
@@ -181,7 +190,7 @@ namespace MyLanService
 
             app.MapPost(
                 "/db/provision/download",
-                async (EmbeddedPostgresManager pgMgr, ProvisionStatusStore statusStore) =>
+                async (ProvisionStatusStore statusStore) =>
                 {
                     statusStore.Reset();
                     statusStore.SetStatus("starting");
@@ -189,19 +198,32 @@ namespace MyLanService
 
                     try
                     {
-                        string baseDir = AppContext.BaseDirectory;
-                        string dataDir = Path.Combine(baseDir, "pgdata");
+                        var env =
+                            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+                            ?? "Production";
+
+                        var dataDir =
+                            env == "Development"
+                                ? Path.Combine(Directory.GetCurrentDirectory(), "pgdata")
+                                : Path.Combine(AppContext.BaseDirectory, "pgdata");
 
                         _logger.LogInformation("Data directory: {DataDir}", dataDir);
 
-                        // using var server = new PgServer("15.3.0", dbDir: dataDir, port: 5432);
-                        // await server.StartAsync();
-                        // pgMgr.StartAsync("15.3.0", dataDir, 5432);
+                        _logger.LogInformation("Instance ID: {InstanceId}", InstanceId);
 
-                        statusStore.SetStatus("completed", null, 100);
+                        // using var server = new PgServer(
+                        //     "15.3.0",
+                        //     dbDir: dataDir,
+                        //     port: 5432,
+                        //     instanceId: InstanceId
+                        // );
+                        // await server.StartAsync();
+                        await _postgresManager.StartAsync("15.3.0", dataDir, 5432, InstanceId);
+
                         statusStore.AddLog(
                             "PostgreSQL binaries downloaded and server started successfully."
                         );
+                        statusStore.SetStatus("completed", null, 100);
 
                         return Results.Ok(new { success = true });
                     }
@@ -209,16 +231,17 @@ namespace MyLanService
                     {
                         statusStore.SetStatus("error", ex.Message);
                         statusStore.AddLog($"Error during download or startup: {ex.Message}");
+                        _logger.LogError(ex, "Error during database download or startup");
                         return Results.Ok(new { success = false, error = ex.Message });
                     }
                 }
             );
 
-            app.MapGet(
+            app.MapPost(
                 "/db/validate",
-                async (EmbeddedPostgresManager pgMgr) =>
+                async (HttpContext context) =>
                 {
-                    if (!pgMgr.IsRunning)
+                    if (!_postgresManager.IsRunning())
                     {
                         _logger.LogInformation("Postgres is not running.");
                         return Results.BadRequest(
@@ -228,17 +251,84 @@ namespace MyLanService
 
                     try
                     {
-                        var cs = pgMgr.GetConnectionString("postgres", "postgres", "postgres");
+                        var requestBody =
+                            await JsonSerializer.DeserializeAsync<DbConnectionRequest>(
+                                context.Request.Body
+                            );
+
+                        _logger.LogInformation("Request body: {RequestBody}", requestBody);
+
+                        if (
+                            requestBody == null
+                            || string.IsNullOrWhiteSpace(requestBody.Host)
+                            || requestBody.Port == 0
+                        )
+                        {
+                            return Results.BadRequest(
+                                new { success = false, error = "Invalid connection details." }
+                            );
+                        }
+
+                        var cs = _postgresManager.GetConnectionString(
+                            "postgres",
+                            requestBody.User,
+                            requestBody.Password,
+                            requestBody.Host,
+                            requestBody.Port
+                        );
                         await using var conn = new NpgsqlConnection(cs);
                         await conn.OpenAsync();
+                        _logger.LogInformation(
+                            "Connection opened: {Database}, {ConnectionState}",
+                            conn.Database,
+                            conn.FullState
+                        );
                         await using var cmd = new NpgsqlCommand("SELECT 1", conn);
                         var result = (int?)await cmd.ExecuteScalarAsync();
+                        await conn.CloseAsync();
+                        _logger.LogInformation(
+                            "Connection result: {Result}, {ConnectionState}",
+                            result,
+                            conn.FullState
+                        );
 
                         return Results.Ok(new { success = result == 1 });
                     }
                     catch (Exception ex)
                     {
-                        return Results.Ok(new { success = false, error = ex.Message });
+                        _logger.LogError(ex, "Error validating database connection");
+                        return Results.BadRequest(new { success = false, error = ex.Message });
+                    }
+                }
+            );
+
+            app.MapPost(
+                "/db/migrations/run",
+                async (HttpContext context, ProvisionStatusStore statusStore) =>
+                {
+                    // optional: if you expect a payload, you can deserialize it here:
+                    // var payload = await JsonSerializer.DeserializeAsync<YourDto>(context.Request.Body);
+
+                    statusStore.Reset();
+                    statusStore.SetStatus("starting");
+
+                    // Run the EF Core migrations
+                    try
+                    {
+                        _logger.LogInformation("Applying migrations…");
+                        statusStore.AddLog("Applying migrations…");
+                        await _dbManager.MigrateAsync();
+                        statusStore.AddLog("Migrations applied successfully.");
+                        _logger.LogInformation("Migrations applied successfully.");
+                        statusStore.SetStatus("completed", null, 100);
+                        return Results.Ok(new { success = true });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error running migrations");
+                        statusStore.SetStatus("error", ex.Message);
+                        statusStore.AddLog($"Error running migrations: {ex.Message}");
+                        return Results.BadRequest(new { success = false, error = ex.Message });
                     }
                 }
             );
