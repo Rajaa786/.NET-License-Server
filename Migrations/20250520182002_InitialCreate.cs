@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using System;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
@@ -31,8 +32,8 @@ namespace MyLanService.Migrations
                     id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     company_name = table.Column<string>(type: "text", nullable: false),
-                    date = table.Column<long>(type: "bigint", nullable: false),
-                    effective_date = table.Column<long>(type: "bigint", nullable: false),
+                    date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    effective_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     bill_reference = table.Column<string>(type: "text", nullable: false),
                     dr_ledger = table.Column<string>(type: "text", nullable: false),
                     cr_ledger = table.Column<string>(type: "text", nullable: false),
@@ -57,9 +58,9 @@ namespace MyLanService.Migrations
                     email = table.Column<string>(type: "text", nullable: false),
                     role = table.Column<string>(type: "text", nullable: false, defaultValue: "CA"),
                     password = table.Column<string>(type: "text", nullable: false),
-                    date_joined = table.Column<long>(type: "bigint", nullable: false),
-                    expiry = table.Column<long>(type: "bigint", nullable: false),
-                    last_login = table.Column<long>(type: "bigint", nullable: true)
+                    date_joined = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    expiry = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    last_login = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -76,7 +77,7 @@ namespace MyLanService.Migrations
                     user_id = table.Column<int>(type: "integer", nullable: false),
                     status = table.Column<string>(type: "text", nullable: false),
                     pages = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
-                    created_at = table.Column<long>(type: "bigint", nullable: false),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false)
                 },
                 constraints: table =>
@@ -166,9 +167,9 @@ namespace MyLanService.Migrations
                     ifsc_code = table.Column<string>(type: "text", nullable: false),
                     bank_name = table.Column<string>(type: "text", nullable: false),
                     file_path = table.Column<string>(type: "text", nullable: false, defaultValue: "downloads"),
-                    created_at = table.Column<long>(type: "bigint", nullable: false),
-                    start_date = table.Column<long>(type: "bigint", nullable: true),
-                    end_date = table.Column<long>(type: "bigint", nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    start_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    end_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     password = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
@@ -208,9 +209,8 @@ namespace MyLanService.Migrations
                 {
                     id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    statement_id = table.Column<string>(type: "text", nullable: false),
-                    StatementId1 = table.Column<int>(type: "integer", nullable: false),
-                    date = table.Column<long>(type: "bigint", nullable: false),
+                    statement_id = table.Column<int>(type: "integer", nullable: false),
+                    date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     description = table.Column<string>(type: "text", nullable: false),
                     amount = table.Column<double>(type: "double precision", nullable: false),
                     category = table.Column<string>(type: "text", nullable: false),
@@ -219,14 +219,14 @@ namespace MyLanService.Migrations
                     bank = table.Column<string>(type: "text", nullable: false, defaultValue: "unknown"),
                     entity = table.Column<string>(type: "text", nullable: false, defaultValue: "unknown"),
                     voucher_type = table.Column<string>(type: "text", nullable: false, defaultValue: "unknown"),
-                    created_at = table.Column<long>(type: "bigint", nullable: false)
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_transactions", x => x.id);
                     table.ForeignKey(
-                        name: "FK_transactions_statements_StatementId1",
-                        column: x => x.StatementId1,
+                        name: "FK_transactions_statements_statement_id",
+                        column: x => x.statement_id,
                         principalTable: "statements",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
@@ -239,12 +239,12 @@ namespace MyLanService.Migrations
                     id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     transaction_id = table.Column<int>(type: "integer", nullable: false),
-                    effective_date = table.Column<long>(type: "bigint", nullable: true),
+                    effective_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     bill_reference = table.Column<string>(type: "text", nullable: false),
                     failed_reason = table.Column<string>(type: "text", nullable: false),
                     bank_ledger = table.Column<string>(type: "text", nullable: false),
                     result = table.Column<bool>(type: "boolean", nullable: false),
-                    created_at = table.Column<long>(type: "bigint", nullable: false),
+                    created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     StatementId = table.Column<int>(type: "integer", nullable: true)
                 },
                 constraints: table =>
@@ -304,9 +304,9 @@ namespace MyLanService.Migrations
                 column: "transaction_id");
 
             migrationBuilder.CreateIndex(
-                name: "IX_transactions_StatementId1",
+                name: "IX_transactions_statement_id",
                 table: "transactions",
-                column: "StatementId1");
+                column: "statement_id");
         }
 
         /// <inheritdoc />

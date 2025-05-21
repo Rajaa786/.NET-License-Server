@@ -34,9 +34,15 @@ namespace MyLanService.Database
                 eb.Property(u => u.Email).HasColumnName("email").IsRequired();
                 eb.Property(u => u.Role).HasColumnName("role").HasDefaultValue("CA");
                 eb.Property(u => u.Password).HasColumnName("password").IsRequired();
-                eb.Property(u => u.DateJoined).HasColumnName("date_joined");
-                eb.Property(u => u.ExpiryDate).HasColumnName("expiry");
-                eb.Property(u => u.LastLogin).HasColumnName("last_login");
+                eb.Property(u => u.DateJoined)
+                    .HasColumnName("date_joined")
+                    .HasColumnType("timestamp with time zone");
+                eb.Property(u => u.ExpiryDate)
+                    .HasColumnName("expiry")
+                    .HasColumnType("timestamp with time zone");
+                eb.Property(u => u.LastLogin)
+                    .HasColumnName("last_login")
+                    .HasColumnType("timestamp with time zone");
                 eb.HasMany(u => u.Cases)
                     .WithOne(c => c.User)
                     .HasForeignKey(c => c.UserId)
@@ -53,7 +59,9 @@ namespace MyLanService.Database
                 eb.Property(c => c.UserId).HasColumnName("user_id").IsRequired();
                 eb.Property(c => c.Status).HasColumnName("status").IsRequired();
                 eb.Property(c => c.Pages).HasColumnName("pages").HasDefaultValue(0);
-                eb.Property(c => c.CreatedAt).HasColumnName("created_at");
+                eb.Property(c => c.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("timestamp with time zone");
                 eb.Property(c => c.Deleted).HasColumnName("deleted").HasDefaultValue(false);
                 eb.HasMany(c => c.Eods)
                     .WithOne(e => e.Case)
@@ -113,8 +121,14 @@ namespace MyLanService.Database
                 eb.HasKey(v => v.Id);
                 eb.Property(v => v.Id).HasColumnName("id");
                 eb.Property(v => v.CompanyName).HasColumnName("company_name").IsRequired();
-                eb.Property(v => v.Date).HasColumnName("date").IsRequired();
-                eb.Property(v => v.EffectiveDate).HasColumnName("effective_date").IsRequired();
+                eb.Property(v => v.Date)
+                    .HasColumnName("date")
+                    .HasColumnType("timestamp with time zone")
+                    .IsRequired();
+                eb.Property(v => v.EffectiveDate)
+                    .HasColumnName("effective_date")
+                    .HasColumnType("timestamp with time zone")
+                    .IsRequired();
                 eb.Property(v => v.BillReference).HasColumnName("bill_reference").IsRequired();
                 eb.Property(v => v.DrLedger).HasColumnName("dr_ledger").IsRequired();
                 eb.Property(v => v.CrLedger).HasColumnName("cr_ledger").IsRequired();
@@ -157,7 +171,9 @@ namespace MyLanService.Database
                 eb.Property(s => s.FilePath)
                     .HasColumnName("file_path")
                     .HasDefaultValue("downloads");
-                eb.Property(s => s.CreatedAt).HasColumnName("created_at").IsRequired();
+                eb.Property(s => s.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("timestamp with time zone");
                 eb.Property(s => s.StartDate).HasColumnName("start_date");
                 eb.Property(s => s.EndDate).HasColumnName("end_date");
                 eb.Property(s => s.Password).HasColumnName("password");
@@ -180,7 +196,10 @@ namespace MyLanService.Database
                 eb.HasKey(t => t.Id);
                 eb.Property(t => t.Id).HasColumnName("id");
                 eb.Property(t => t.StatementId).HasColumnName("statement_id").IsRequired();
-                eb.Property(t => t.Date).HasColumnName("date").IsRequired();
+                eb.Property(t => t.Date)
+                    .HasColumnName("date")
+                    .HasColumnType("timestamp with time zone")
+                    .IsRequired();
                 eb.Property(t => t.Description).HasColumnName("description").IsRequired();
                 eb.Property(t => t.Amount).HasColumnName("amount").IsRequired();
                 eb.Property(t => t.Category).HasColumnName("category").IsRequired();
@@ -191,7 +210,10 @@ namespace MyLanService.Database
                 eb.Property(t => t.VoucherType)
                     .HasColumnName("voucher_type")
                     .HasDefaultValue("unknown");
-                eb.Property(t => t.CreatedAt).HasColumnName("created_at").IsRequired();
+                eb.Property(t => t.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("timestamp with time zone")
+                    .IsRequired();
             });
 
             // tally_voucher
@@ -201,12 +223,17 @@ namespace MyLanService.Database
                 eb.HasKey(tv => tv.Id);
                 eb.Property(tv => tv.Id).HasColumnName("id");
                 eb.Property(tv => tv.TransactionId).HasColumnName("transaction_id").IsRequired();
-                eb.Property(tv => tv.EffectiveDate).HasColumnName("effective_date");
+                eb.Property(tv => tv.EffectiveDate)
+                    .HasColumnName("effective_date")
+                    .HasColumnType("timestamp with time zone");
                 eb.Property(tv => tv.BillReference).HasColumnName("bill_reference");
                 eb.Property(tv => tv.FailedReason).HasColumnName("failed_reason");
                 eb.Property(tv => tv.BankLedger).HasColumnName("bank_ledger").IsRequired();
                 eb.Property(tv => tv.Result).HasColumnName("result").IsRequired();
-                eb.Property(tv => tv.CreatedAt).HasColumnName("created_at").IsRequired();
+                eb.Property(tv => tv.CreatedAt)
+                    .HasColumnName("created_at")
+                    .HasColumnType("timestamp with time zone")
+                    .IsRequired();
             });
         }
     }

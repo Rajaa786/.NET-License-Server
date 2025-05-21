@@ -10,9 +10,9 @@ namespace MyLanService.Core
         public string Email { get; set; }
         public string Role { get; set; } = "CA";
         public string Password { get; set; }
-        public long DateJoined { get; set; }
-        public long ExpiryDate { get; set; }
-        public long? LastLogin { get; set; }
+        public DateTime DateJoined { get; set; }
+        public DateTime ExpiryDate { get; set; }
+        public DateTime? LastLogin { get; set; }
 
         public ICollection<Case> Cases { get; set; }
     }
@@ -25,7 +25,7 @@ namespace MyLanService.Core
         public User User { get; set; }
         public string Status { get; set; }
         public int Pages { get; set; } = 0;
-        public long CreatedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
         public bool Deleted { get; set; } = false;
 
         public ICollection<Eod> Eods { get; set; }
@@ -61,8 +61,8 @@ namespace MyLanService.Core
     {
         public int Id { get; set; }
         public string CompanyName { get; set; }
-        public long Date { get; set; }
-        public long EffectiveDate { get; set; }
+        public DateTime Date { get; set; }
+        public DateTime EffectiveDate { get; set; }
         public string BillReference { get; set; }
         public string DrLedger { get; set; }
         public string CrLedger { get; set; }
@@ -95,9 +95,9 @@ namespace MyLanService.Core
         public string IfscCode { get; set; }
         public string BankName { get; set; }
         public string FilePath { get; set; } = "downloads";
-        public long CreatedAt { get; set; }
-        public long? StartDate { get; set; }
-        public long? EndDate { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? EndDate { get; set; }
         public string Password { get; set; }
 
         public ICollection<Transaction> Transactions { get; set; }
@@ -117,20 +117,20 @@ namespace MyLanService.Core
         public int Id { get; set; }
         public int TransactionId { get; set; }
         public Transaction Transaction { get; set; }
-        public long? EffectiveDate { get; set; }
+        public DateTime? EffectiveDate { get; set; }
         public string BillReference { get; set; }
         public string FailedReason { get; set; }
         public string BankLedger { get; set; }
         public bool Result { get; set; }
-        public long CreatedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 
     public class Transaction
     {
         public int Id { get; set; }
-        public string StatementId { get; set; }
+        public int StatementId { get; set; }
         public Statement Statement { get; set; }
-        public long Date { get; set; }
+        public DateTime Date { get; set; }
         public string Description { get; set; }
         public double Amount { get; set; }
         public string Category { get; set; }
@@ -139,6 +139,6 @@ namespace MyLanService.Core
         public string Bank { get; set; } = "unknown";
         public string Entity { get; set; } = "unknown";
         public string VoucherType { get; set; } = "unknown";
-        public long CreatedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
     }
 }
