@@ -92,6 +92,9 @@ namespace MyLanService
                     _dbManager
                 );
 
+                // Try to auto-start PostgreSQL server from saved configuration if available
+                await _postgresManager.AutoStartFromConfigAsync();
+                
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
                 var licensePollingTask = _httpApiHost.StartLicensePollingAsync(stoppingToken);
                 _logger.LogInformation("HTTP API Server started on port 7890");

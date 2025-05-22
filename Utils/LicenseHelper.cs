@@ -1,14 +1,22 @@
+using System.IO;
 using System.Management;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
-using System.Net.NetworkInformation;
-
 
 namespace MyLanService.Utils
 {
+    public class DatabaseConfig
+    {
+        public string PostgresVersion { get; set; }
+        public string DataDirectory { get; set; }
+        public int Port { get; set; }
+        public Guid InstanceId { get; set; }
+    }
+
     public class MacUtils
     {
         // P/Invoke for getting the UID on macOS
@@ -41,13 +49,15 @@ namespace MyLanService.Utils
         private string windowsUserSID;
         private string username;
 
+        private static readonly string DatabaseConfigFileName = "database_config.json";
+
+
         // Constructor with DI for ILogger
         public LicenseHelper(ILogger<LicenseHelper> logger)
         {
             _logger = logger;
             InitializeDeviceInfo();
         }
-
 
         private void InitializeDeviceInfo()
         {
@@ -69,7 +79,7 @@ namespace MyLanService.Utils
                 }
                 else
                 {
-                    windowsUserSID = "NotApplicable";  // Not applicable for non-Windows systems
+                    windowsUserSID = "NotApplicable"; // Not applicable for non-Windows systems
                 }
 
                 // Get Username
@@ -86,7 +96,6 @@ namespace MyLanService.Utils
                 _logger.LogError($"Error initializing device info: {ex.Message}", ex);
             }
         }
-
 
         /// <summary>
         /// Saves the encrypted license JSON to a secure location on disk.
@@ -138,17 +147,16 @@ namespace MyLanService.Utils
         public string GetSessionCacheFilePath()
         {
             var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-            string appFolder = !string.IsNullOrWhiteSpace(env) &&
-                               env.Equals("Development", StringComparison.OrdinalIgnoreCase)
-                               ? "CyphersolDev"
-                               : "Cyphersol";
+            string appFolder =
+                !string.IsNullOrWhiteSpace(env)
+                && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                    ? "CyphersolDev"
+                    : "Cyphersol";
 
             string baseDir = PathUtility.GetSharedAppDataPath(appFolder);
             PathUtility.EnsureDirectoryExists(baseDir);
             return Path.Combine(baseDir, "session-cache.enc");
         }
-
-
 
         public string GetLicenseFilePath(string appFolder)
         {
@@ -299,7 +307,6 @@ namespace MyLanService.Utils
             return "UnknownUUID";
         }
 
-
         private string GetMacAddress()
         {
             try
@@ -308,7 +315,10 @@ namespace MyLanService.Utils
                 {
                     if (nic.OperationalStatus == OperationalStatus.Up)
                     {
-                        return string.Join(":", nic.GetPhysicalAddress().GetAddressBytes().Select(b => b.ToString("X2")));
+                        return string.Join(
+                            ":",
+                            nic.GetPhysicalAddress().GetAddressBytes().Select(b => b.ToString("X2"))
+                        );
                     }
                 }
             }
@@ -320,7 +330,6 @@ namespace MyLanService.Utils
             return "UnknownMAC";
         }
 
-
         public string GetDeviceInfo()
         {
             var deviceInfo = new
@@ -329,14 +338,16 @@ namespace MyLanService.Utils
                 macAddress = macAddress,
                 hostname = hostname,
                 windowsUserSID = windowsUserSID,
-                username = username
+                username = username,
             };
 
             return JsonSerializer.Serialize(deviceInfo);
         }
 
-
-        public double GetEffectiveTimestamp(LicenseInfo licenseInfo, Func<Task<bool>> reportClockTamperingCallback = null)
+        public double GetEffectiveTimestamp(
+            LicenseInfo licenseInfo,
+            Func<Task<bool>> reportClockTamperingCallback = null
+        )
         {
             var systemCurrentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             var licenseGeneratedTimestamp = licenseInfo.CurrentTimestamp;
@@ -344,10 +355,16 @@ namespace MyLanService.Utils
             double effectiveCurrentTimestamp;
 
             // 🛡️ Clock tampering check
-            if (systemCurrentTimestamp < licenseGeneratedTimestamp && Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600)
+            if (
+                systemCurrentTimestamp < licenseGeneratedTimestamp
+                && Math.Abs(systemCurrentTimestamp - licenseGeneratedTimestamp) >= 600
+            )
             {
-                _logger?.LogWarning("⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
-                    systemCurrentTimestamp, licenseGeneratedTimestamp);
+                _logger?.LogWarning(
+                    "⏱️ Potential clock tampering detected. System timestamp: {System}, License timestamp: {License}",
+                    systemCurrentTimestamp,
+                    licenseGeneratedTimestamp
+                );
 
                 if (reportClockTamperingCallback != null)
                 {
@@ -357,7 +374,10 @@ namespace MyLanService.Utils
                         try
                         {
                             var result = await reportClockTamperingCallback();
-                            _logger?.LogInformation("System clock tampering report sent. Success: {Result}", result);
+                            _logger?.LogInformation(
+                                "System clock tampering report sent. Success: {Result}",
+                                result
+                            );
                         }
                         catch (Exception ex)
                         {
@@ -377,19 +397,115 @@ namespace MyLanService.Utils
             return effectiveCurrentTimestamp;
         }
 
-
-        public double GetRemainingLicenseSeconds(LicenseInfo licenseInfo, Func<Task<bool>> reportClockTamperingCallback = null)
+        public double GetRemainingLicenseSeconds(
+            LicenseInfo licenseInfo,
+            Func<Task<bool>> reportClockTamperingCallback = null
+        )
         {
             if (licenseInfo == null || !licenseInfo.IsValid())
                 return 0;
 
             var licenseExpiryTimestamp = licenseInfo.ExpiryTimestamp;
-            double effectiveCurrentTimestamp = GetEffectiveTimestamp(licenseInfo, reportClockTamperingCallback);
+            double effectiveCurrentTimestamp = GetEffectiveTimestamp(
+                licenseInfo,
+                reportClockTamperingCallback
+            );
             // Calculate remaining seconds
             double remainingSeconds = licenseExpiryTimestamp - effectiveCurrentTimestamp;
             return remainingSeconds < 0 ? 0 : remainingSeconds;
-
         }
 
+        /// <summary>
+        /// Gets the path to the database configuration file based on the current environment.
+        /// Uses the same location as license files.
+        /// </summary>
+        private string GetDatabaseConfigFilePath()
+        {
+            var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+            string appFolder =
+                !string.IsNullOrWhiteSpace(env)
+                && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                    ? "CyphersolDev"
+                    : "Cyphersol";
+
+            string baseDir = PathUtility.GetSharedAppDataPath(appFolder);
+            PathUtility.EnsureDirectoryExists(baseDir);
+            return Path.Combine(baseDir, DatabaseConfigFileName);
+        }
+
+        /// <summary>
+        /// Saves the database configuration to a JSON file.
+        /// </summary>
+        /// <param name="postgresVersion">The PostgreSQL version</param>
+        /// <param name="dataDirectory">The data directory path</param>
+        /// <param name="port">The PostgreSQL port number</param>
+        /// <param name="instanceId">The instance ID</param>
+        /// <returns>True if the configuration was saved successfully</returns>
+        public bool SaveDatabaseConfig(
+            string postgresVersion,
+            string dataDirectory,
+            int port,
+            Guid instanceId
+        )
+        {
+            try
+            {
+                var config = new DatabaseConfig
+                {
+                    PostgresVersion = postgresVersion,
+                    DataDirectory = dataDirectory,
+                    Port = port,
+                    InstanceId = instanceId,
+                };
+
+                string configJson = JsonSerializer.Serialize(
+                    config,
+                    new JsonSerializerOptions { WriteIndented = true }
+                );
+                string configPath = GetDatabaseConfigFilePath();
+
+                File.WriteAllText(configPath, configJson);
+                _logger?.LogInformation("Database configuration saved to {ConfigPath}", configPath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to save database configuration");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Loads the database configuration from the JSON file.
+        /// </summary>
+        /// <returns>The database configuration or null if the file doesn't exist or can't be read</returns>
+        public DatabaseConfig LoadDatabaseConfig()
+        {
+            try
+            {
+                string configPath = GetDatabaseConfigFilePath();
+                if (!File.Exists(configPath))
+                {
+                    _logger?.LogInformation(
+                        "Database configuration file not found at {ConfigPath}",
+                        configPath
+                    );
+                    return null;
+                }
+
+                string configJson = File.ReadAllText(configPath);
+                var config = JsonSerializer.Deserialize<DatabaseConfig>(configJson);
+                _logger?.LogInformation(
+                    "Database configuration loaded from {ConfigPath}",
+                    configPath
+                );
+                return config;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to load database configuration");
+                return null;
+            }
+        }
     }
 }

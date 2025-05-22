@@ -1,3 +1,4 @@
+using MyLanService.Utils;
 using MysticMind.PostgresEmbed;
 using Npgsql;
 
@@ -6,6 +7,7 @@ namespace MyLanService
     public class EmbeddedPostgresManager : IAsyncDisposable
     {
         readonly ILogger<EmbeddedPostgresManager> _logger;
+        readonly LicenseHelper _licenseHelper;
         PgServer _server;
 
         public bool IsRunning()
@@ -22,9 +24,13 @@ namespace MyLanService
             }
         }
 
-        public EmbeddedPostgresManager(ILogger<EmbeddedPostgresManager> logger)
+        public EmbeddedPostgresManager(
+            ILogger<EmbeddedPostgresManager> logger,
+            LicenseHelper licenseHelper
+        )
         {
             _logger = logger;
+            _licenseHelper = licenseHelper;
         }
 
         public async Task StartAsync(string version, string dbDir, int port, Guid InstanceId)
@@ -70,6 +76,48 @@ namespace MyLanService
         public async ValueTask DisposeAsync()
         {
             Stop();
+        }
+
+        /// <summary>
+        /// Attempts to start PostgreSQL server from saved configuration.
+        /// Assumes the server is not running when the app starts.
+        /// </summary>
+        /// <returns>True if the server was started successfully, false otherwise</returns>
+        public async Task<bool> AutoStartFromConfigAsync()
+        {
+            try
+            {
+                // Try to load database configuration
+                var config = _licenseHelper.LoadDatabaseConfig();
+                if (config == null)
+                {
+                    _logger.LogInformation("No database configuration found, skipping auto-start");
+                    return false;
+                }
+
+                _logger.LogInformation(
+                    "Found database configuration, attempting to start PostgreSQL server {config}",
+                    config
+                );
+
+                // Start the server with the saved configuration
+                await StartAsync(
+                    config.PostgresVersion,
+                    config.DataDirectory,
+                    config.Port,
+                    config.InstanceId
+                );
+
+                _logger.LogInformation(
+                    "PostgreSQL server auto-started successfully from saved configuration"
+                );
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to auto-start PostgreSQL server from configuration");
+                return false;
+            }
         }
     }
 }

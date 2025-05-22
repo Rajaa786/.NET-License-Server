@@ -218,7 +218,43 @@ namespace MyLanService
                         //     instanceId: InstanceId
                         // );
                         // await server.StartAsync();
-                        await _postgresManager.StartAsync("15.3.0", dataDir, 5432, InstanceId);
+
+                        // Start PostgreSQL and save config in parallel
+                        var startPgServerTask = _postgresManager.StartAsync(
+                            "15.3.0",
+                            dataDir,
+                            5432,
+                            InstanceId
+                        );
+
+                        // Save database configuration
+                        var saveConfigTask = Task.Run(() =>
+                        {
+                            bool configSaved = _licenseHelper.SaveDatabaseConfig(
+                                "15.3.0",
+                                dataDir,
+                                5432,
+                                InstanceId
+                            );
+
+                            if (configSaved)
+                            {
+                                statusStore.AddLog("Database configuration saved successfully.");
+                                _logger.LogInformation(
+                                    "Database configuration saved successfully."
+                                );
+                            }
+                            else
+                            {
+                                statusStore.AddLog(
+                                    "Warning: Failed to save database configuration."
+                                );
+                                _logger.LogWarning("Failed to save database configuration.");
+                            }
+                        });
+
+                        // Wait for both tasks
+                        await Task.WhenAll(startPgServerTask, saveConfigTask);
 
                         statusStore.AddLog(
                             "PostgreSQL binaries downloaded and server started successfully."
