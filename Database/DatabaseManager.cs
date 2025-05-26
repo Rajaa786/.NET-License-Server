@@ -27,8 +27,8 @@ namespace MyLanService.Database
         {
             if (!_pgManager.IsRunning())
             {
-                _logger.LogInformation("[DB] Starting embedded Postgres before migration…");
-                await _pgManager.StartAsync("15.3.0", "./pg_data", 5432, Guid.NewGuid());
+                // _logger.LogInformation("[DB] Starting embedded Postgres before migration…");
+                // await _pgManager.StartAsync("15.3.0", "./pg_data", 5432, Guid.NewGuid());
             }
 
             _logger.LogInformation("[DB] Applying EF Core migrations…");

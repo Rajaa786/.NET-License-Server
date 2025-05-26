@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MyLanService.Utils;
 using MysticMind.PostgresEmbed;
 using Npgsql;
@@ -33,14 +34,20 @@ namespace MyLanService
             _licenseHelper = licenseHelper;
         }
 
-        public async Task StartAsync(string version, string dbDir, int port, Guid InstanceId)
+        public async Task StartAsync(string version, int port, Guid InstanceId, string dbDir = "")
         {
             if (_server != null)
                 return;
 
             _logger.LogInformation("Starting embedded Postgres…");
 
-            _server = new PgServer(version, dbDir: dbDir, port: port, instanceId: InstanceId);
+            _server = new PgServer(
+                version,
+                dbDir: dbDir,
+                port: port,
+                instanceId: InstanceId,
+                addLocalUserAccessPermission: true
+            );
             await _server.StartAsync();
 
             _logger.LogInformation("Embedded Postgres is now running on port {Port}", port);
@@ -96,16 +103,19 @@ namespace MyLanService
                 }
 
                 _logger.LogInformation(
-                    "Found database configuration, attempting to start PostgreSQL server {config}",
-                    config
+                    "Found database configuration, attempting to start PostgreSQL server {version} {dataDirectory} {port} {instanceId}",
+                    config.PostgresVersion,
+                    config.Port,
+                    config.InstanceId,
+                    config.DataDirectory
                 );
 
                 // Start the server with the saved configuration
                 await StartAsync(
                     config.PostgresVersion,
-                    config.DataDirectory,
                     config.Port,
-                    config.InstanceId
+                    config.InstanceId,
+                    config.DataDirectory
                 );
 
                 _logger.LogInformation(

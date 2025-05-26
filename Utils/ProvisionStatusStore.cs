@@ -1,9 +1,45 @@
-namespace MyLanService
+namespace MyLanService.Utils
 {
+    public enum LogLevel
+    {
+        Info,
+        Warning,
+        Error,
+    }
+
+    public class LogEntry
+    {
+        private readonly string _timestamp;
+        private readonly string _fullMessage;
+        public string Message { get; }
+        public LogLevel Level { get; }
+
+        public LogEntry(string message, LogLevel level)
+        {
+            Message = message;
+            Level = level;
+            _timestamp = DateTime.Now.ToString("HH:mm:ss");
+            string levelPrefix = Level switch
+            {
+                LogLevel.Info => "[INFO]   ",
+                LogLevel.Warning => "[WARNING]",
+                LogLevel.Error => "[ERROR]  ",
+                _ => "[INFO]   ",
+            };
+
+            _fullMessage = $"[{_timestamp}] {levelPrefix} {Message}";
+        }
+
+        public override string ToString()
+        {
+            return _fullMessage;
+        }
+    }
+
     public class ProvisionStatus
     {
         public string Status { get; set; } = "in-progress"; // "completed", "error"
-        public List<string> Logs { get; set; } = new();
+        public List<LogEntry> Logs { get; set; } = new();
         public int? Progress { get; set; }
         public string? Error { get; set; }
     }
@@ -23,12 +59,27 @@ namespace MyLanService
             }
         }
 
-        public void AddLog(string log)
+        public void AddLog(string message, LogLevel level = LogLevel.Info)
         {
             lock (_lock)
             {
-                _status.Logs.Add($"[{DateTime.Now:HH:mm:ss}] {log}");
+                _status.Logs.Add(new LogEntry(message, level));
             }
+        }
+
+        public void AddErrorLog(string message)
+        {
+            AddLog(message, LogLevel.Error);
+        }
+
+        public void AddWarningLog(string message)
+        {
+            AddLog(message, LogLevel.Warning);
+        }
+
+        public void AddInfoLog(string message)
+        {
+            AddLog(message, LogLevel.Info);
         }
 
         public ProvisionStatus GetStatus()
@@ -39,7 +90,7 @@ namespace MyLanService
                 {
                     Status = _status.Status,
                     Error = _status.Error,
-                    Logs = new List<string>(_status.Logs),
+                    Logs = new List<LogEntry>(_status.Logs),
                     Progress = _status.Progress,
                 };
             }

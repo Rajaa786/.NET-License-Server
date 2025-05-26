@@ -48,14 +48,15 @@ namespace MyLanService.Utils
         private string hostname;
         private string windowsUserSID;
         private string username;
+        private PathUtility _pathUtility;
 
         private static readonly string DatabaseConfigFileName = "database_config.json";
 
-
         // Constructor with DI for ILogger
-        public LicenseHelper(ILogger<LicenseHelper> logger)
+        public LicenseHelper(ILogger<LicenseHelper> logger, PathUtility pathUtility)
         {
             _logger = logger;
+            _pathUtility = pathUtility;
             InitializeDeviceInfo();
         }
 
@@ -153,17 +154,31 @@ namespace MyLanService.Utils
                     ? "CyphersolDev"
                     : "Cyphersol";
 
-            string baseDir = PathUtility.GetSharedAppDataPath(appFolder);
-            PathUtility.EnsureDirectoryExists(baseDir);
+            string baseDir = _pathUtility.GetSharedAppDataPath(appFolder);
+            _pathUtility.EnsureDirectoryExists(baseDir);
             return Path.Combine(baseDir, "session-cache.enc");
         }
 
         public string GetLicenseFilePath(string appFolder)
         {
-            string baseDir = PathUtility.GetSharedAppDataPath(appFolder);
-            PathUtility.EnsureDirectoryExists(baseDir);
+            string baseDir = _pathUtility.GetSharedAppDataPath(appFolder);
+            _pathUtility.EnsureDirectoryExists(baseDir);
             string licenseFilePath = Path.Combine(baseDir, "license.enc");
             return licenseFilePath;
+        }
+
+        public string GetDatabaseDataDirectory()
+        {
+            var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+            string appFolder =
+                !string.IsNullOrWhiteSpace(env)
+                && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                    ? "CyphersolDev"
+                    : "Cyphersol";
+
+            string baseDir = _pathUtility.GetSharedAppDataPath(appFolder);
+            _pathUtility.EnsureDirectoryExists(baseDir);
+            return Path.Combine(baseDir, "pgdata");
         }
 
         public bool EnsureLicenseFileExists(string path)
@@ -428,8 +443,8 @@ namespace MyLanService.Utils
                     ? "CyphersolDev"
                     : "Cyphersol";
 
-            string baseDir = PathUtility.GetSharedAppDataPath(appFolder);
-            PathUtility.EnsureDirectoryExists(baseDir);
+            string baseDir = _pathUtility.GetSharedAppDataPath(appFolder);
+            _pathUtility.EnsureDirectoryExists(baseDir);
             return Path.Combine(baseDir, DatabaseConfigFileName);
         }
 

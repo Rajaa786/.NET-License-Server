@@ -178,7 +178,14 @@ namespace MyLanService
                     var response = new
                     {
                         status = status.Status ?? "unknown",
-                        logs = status.Logs ?? new List<string>(),
+                        logs = (status.Logs ?? new List<MyLanService.Utils.LogEntry>())
+                            .Select(log => new
+                            {
+                                message = log.ToString(),
+                                rawMessage = log.Message,
+                                level = log.Level.ToString().ToLower(),
+                            })
+                            .ToList(),
                         progress = status.Progress is >= 0 and <= 100 ? status.Progress : 0,
                         error = status.Error ?? string.Empty,
                         timestamp = DateTime.UtcNow,
@@ -194,7 +201,7 @@ namespace MyLanService
                 {
                     statusStore.Reset();
                     statusStore.SetStatus("starting");
-                    statusStore.AddLog("Starting PostgreSQL binary setup...");
+                    statusStore.AddInfoLog("Starting PostgreSQL binary setup...");
 
                     try
                     {
@@ -202,12 +209,15 @@ namespace MyLanService
                             Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
                             ?? "Production";
 
-                        var dataDir =
-                            env == "Development"
-                                ? Path.Combine(Directory.GetCurrentDirectory(), "pgdata")
-                                : Path.Combine(AppContext.BaseDirectory, "pgdata");
+                        // var dataDir =
+                        //     env == "Development"
+                        //         ? Path.Combine(Directory.GetCurrentDirectory(), "pgdata")
+                        //         : Path.Combine(AppContext.BaseDirectory, "pgdata");
+                        var dataDir = _licenseHelper.GetDatabaseDataDirectory();
 
                         _logger.LogInformation("Data directory: {DataDir}", dataDir);
+
+                        // var dataDir = "/usr/local/var/CyphersolDev/pgdata";
 
                         _logger.LogInformation("Instance ID: {InstanceId}", InstanceId);
 
@@ -222,9 +232,9 @@ namespace MyLanService
                         // Start PostgreSQL and save config in parallel
                         var startPgServerTask = _postgresManager.StartAsync(
                             "15.3.0",
-                            dataDir,
                             5432,
-                            InstanceId
+                            InstanceId,
+                            dataDir
                         );
 
                         // Save database configuration
@@ -239,24 +249,24 @@ namespace MyLanService
 
                             if (configSaved)
                             {
-                                statusStore.AddLog("Database configuration saved successfully.");
+                                statusStore.AddInfoLog(
+                                    "Database configuration saved successfully."
+                                );
                                 _logger.LogInformation(
                                     "Database configuration saved successfully."
                                 );
                             }
                             else
                             {
-                                statusStore.AddLog(
-                                    "Warning: Failed to save database configuration."
-                                );
-                                _logger.LogWarning("Failed to save database configuration.");
+                                statusStore.AddErrorLog("Failed to save database configuration.");
+                                _logger.LogError("Failed to save database configuration.");
                             }
                         });
 
                         // Wait for both tasks
                         await Task.WhenAll(startPgServerTask, saveConfigTask);
 
-                        statusStore.AddLog(
+                        statusStore.AddInfoLog(
                             "PostgreSQL binaries downloaded and server started successfully."
                         );
                         statusStore.SetStatus("completed", null, 100);
@@ -266,7 +276,7 @@ namespace MyLanService
                     catch (Exception ex)
                     {
                         statusStore.SetStatus("error", ex.Message);
-                        statusStore.AddLog($"Error during download or startup: {ex.Message}");
+                        statusStore.AddErrorLog($"Error during download or startup: {ex.Message}");
                         _logger.LogError(ex, "Error during database download or startup");
                         return Results.Ok(new { success = false, error = ex.Message });
                     }
@@ -352,9 +362,9 @@ namespace MyLanService
                     try
                     {
                         _logger.LogInformation("Applying migrations…");
-                        statusStore.AddLog("Applying migrations…");
+                        statusStore.AddInfoLog("Applying migrations…");
                         await _dbManager.MigrateAsync();
-                        statusStore.AddLog("Migrations applied successfully.");
+                        statusStore.AddInfoLog("Migrations applied successfully.");
                         _logger.LogInformation("Migrations applied successfully.");
                         statusStore.SetStatus("completed", null, 100);
                         return Results.Ok(new { success = true });
@@ -363,7 +373,7 @@ namespace MyLanService
                     {
                         _logger.LogError(ex, "Error running migrations");
                         statusStore.SetStatus("error", ex.Message);
-                        statusStore.AddLog($"Error running migrations: {ex.Message}");
+                        statusStore.AddErrorLog($"Error running migrations: {ex.Message}");
                         return Results.BadRequest(new { success = false, error = ex.Message });
                     }
                 }
