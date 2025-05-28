@@ -93,7 +93,7 @@ namespace MyLanService
                 );
 
                 // Try to auto-start PostgreSQL server from saved configuration if available
-                // await _postgresManager.AutoStartFromConfigAsync();
+                await _postgresManager.AutoStartFromConfigAsync();
 
                 var httpTask = _httpApiHost.StartAsync(stoppingToken);
                 var licensePollingTask = _httpApiHost.StartLicensePollingAsync(stoppingToken);

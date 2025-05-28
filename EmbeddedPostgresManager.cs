@@ -41,12 +41,27 @@ namespace MyLanService
 
             _logger.LogInformation("Starting embedded Postgres…");
 
+            var serverParams = new Dictionary<string, string>();
+
+            // // set generic query optimizer to off
+            // serverParams.Add("geqo", "off");
+
+            // // set timezone as UTC
+            // serverParams.Add("timezone", "UTC");
+
+            // // switch off synchronous commit
+            // serverParams.Add("synchronous_commit", "off");
+
+            // set max connections
+            serverParams.Add("max_connections", "500");
+
             _server = new PgServer(
                 version,
                 dbDir: dbDir,
                 port: port,
                 instanceId: InstanceId,
-                addLocalUserAccessPermission: true
+                addLocalUserAccessPermission: true,
+                pgServerParams: serverParams
             );
             await _server.StartAsync();
 
