@@ -231,7 +231,7 @@ namespace MyLanService
 
                         // Start PostgreSQL and save config in parallel
                         var startPgServerTask = _postgresManager.StartAsync(
-                            "15.3.0",
+                            "17.4.0",
                             5432,
                             InstanceId,
                             dataDir
@@ -241,7 +241,7 @@ namespace MyLanService
                         var saveConfigTask = Task.Run(() =>
                         {
                             bool configSaved = _licenseHelper.SaveDatabaseConfig(
-                                "15.3.0",
+                                "17.4.0",
                                 dataDir,
                                 5432,
                                 InstanceId
