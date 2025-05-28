@@ -39,7 +39,7 @@ namespace MyLanService.Migrations
                     cr_ledger = table.Column<string>(type: "text", nullable: false),
                     amount = table.Column<double>(type: "double precision", nullable: false),
                     voucher_type = table.Column<string>(type: "text", nullable: false),
-                    narration = table.Column<string>(type: "text", nullable: false),
+                    narration = table.Column<string>(type: "text", nullable: true),
                     status = table.Column<string>(type: "text", nullable: false),
                     transaction_id = table.Column<string>(type: "text", nullable: false)
                 },
@@ -164,13 +164,13 @@ namespace MyLanService.Migrations
                     case_id = table.Column<int>(type: "integer", nullable: false),
                     account_number = table.Column<string>(type: "text", nullable: false),
                     customer_name = table.Column<string>(type: "text", nullable: false),
-                    ifsc_code = table.Column<string>(type: "text", nullable: false),
-                    bank_name = table.Column<string>(type: "text", nullable: false),
+                    ifsc_code = table.Column<string>(type: "text", nullable: true),
+                    bank_name = table.Column<string>(type: "text", nullable: true),
                     file_path = table.Column<string>(type: "text", nullable: false, defaultValue: "downloads"),
                     created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     start_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     end_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    password = table.Column<string>(type: "text", nullable: false)
+                    password = table.Column<string>(type: "text", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -240,8 +240,8 @@ namespace MyLanService.Migrations
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     transaction_id = table.Column<int>(type: "integer", nullable: false),
                     effective_date = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    bill_reference = table.Column<string>(type: "text", nullable: false),
-                    failed_reason = table.Column<string>(type: "text", nullable: false),
+                    bill_reference = table.Column<string>(type: "text", nullable: true),
+                    failed_reason = table.Column<string>(type: "text", nullable: true),
                     bank_ledger = table.Column<string>(type: "text", nullable: false),
                     result = table.Column<bool>(type: "boolean", nullable: false),
                     created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),

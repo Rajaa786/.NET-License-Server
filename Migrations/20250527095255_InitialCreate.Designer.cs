@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace MyLanService.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250520182002_InitialCreate")]
+    [Migration("20250527095255_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -182,7 +182,6 @@ namespace MyLanService.Migrations
                         .HasColumnName("effective_date");
 
                     b.Property<string>("Narration")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("narration");
 
@@ -261,7 +260,6 @@ namespace MyLanService.Migrations
                         .HasColumnName("account_number");
 
                     b.Property<string>("BankName")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("bank_name");
 
@@ -290,12 +288,10 @@ namespace MyLanService.Migrations
                         .HasColumnName("file_path");
 
                     b.Property<string>("IfscCode")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("ifsc_code");
 
                     b.Property<string>("Password")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("password");
 
@@ -350,7 +346,6 @@ namespace MyLanService.Migrations
                         .HasColumnName("bank_ledger");
 
                     b.Property<string>("BillReference")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("bill_reference");
 
@@ -363,7 +358,6 @@ namespace MyLanService.Migrations
                         .HasColumnName("effective_date");
 
                     b.Property<string>("FailedReason")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("failed_reason");
 

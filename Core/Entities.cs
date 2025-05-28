@@ -68,7 +68,7 @@ namespace MyLanService.Core
         public string CrLedger { get; set; }
         public double Amount { get; set; }
         public string VoucherType { get; set; }
-        public string Narration { get; set; }
+        public string? Narration { get; set; }
         public string Status { get; set; }
         public string TransactionId { get; set; }
     }
@@ -92,13 +92,13 @@ namespace MyLanService.Core
         public Case Case { get; set; }
         public string AccountNumber { get; set; }
         public string CustomerName { get; set; }
-        public string IfscCode { get; set; }
-        public string BankName { get; set; }
+        public string? IfscCode { get; set; }
+        public string? BankName { get; set; }
         public string FilePath { get; set; } = "downloads";
         public DateTime CreatedAt { get; set; }
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
-        public string Password { get; set; }
+        public string? Password { get; set; }
 
         public ICollection<Transaction> Transactions { get; set; }
         public ICollection<TallyVoucher> TallyVouchers { get; set; }
@@ -118,8 +118,8 @@ namespace MyLanService.Core
         public int TransactionId { get; set; }
         public Transaction Transaction { get; set; }
         public DateTime? EffectiveDate { get; set; }
-        public string BillReference { get; set; }
-        public string FailedReason { get; set; }
+        public string? BillReference { get; set; }
+        public string? FailedReason { get; set; }
         public string BankLedger { get; set; }
         public bool Result { get; set; }
         public DateTime CreatedAt { get; set; }
