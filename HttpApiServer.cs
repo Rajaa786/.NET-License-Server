@@ -9,12 +9,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Makaretu.Dns;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using MyLanService.Database;
 using MyLanService.Middlewares;
+using MyLanService.Services;
 using MyLanService.Utils;
 using MysticMind.PostgresEmbed;
 using Newtonsoft.Json.Linq;
@@ -44,19 +47,18 @@ namespace MyLanService
         private WebApplication _app;
         private readonly LicenseStateManager _licenseStateManager;
         private readonly LicenseInfoProvider _licenseInfoProvider;
-        private readonly ServiceDiscovery _serviceDiscovery;
+        private readonly LicenseHelper _licenseHelper;
+        private readonly MdnsAdvertiser _mdnsAdvertiser;
+        private readonly UdpDiscoveryService _udpDiscoveryService;
 
         static readonly Guid InstanceId = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
-        private readonly LicenseHelper _licenseHelper;
-
+        private readonly EmbeddedPostgresManager _postgresManager;
+        private readonly DatabaseManager _dbManager;
         private readonly HttpClient _httpClient;
         private readonly string _djangoBaseUrl;
 
         public record PortPayload(int Port);
-
-        private readonly EmbeddedPostgresManager _postgresManager;
-        private readonly DatabaseManager _dbManager;
 
         public HttpApiHost(
             int port,
@@ -65,7 +67,8 @@ namespace MyLanService
             LicenseInfoProvider licenseInfoProvider,
             LicenseHelper licenseHelper,
             IConfiguration configuration,
-            ServiceDiscovery serviceDiscovery,
+            MdnsAdvertiser mdnsAdvertiser,
+            UdpDiscoveryService udpDiscoveryService,
             EmbeddedPostgresManager postgresManager,
             DatabaseManager dbManager
         )
@@ -86,14 +89,10 @@ namespace MyLanService
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
             _licenseHelper = licenseHelper;
-            _serviceDiscovery = serviceDiscovery;
+            _mdnsAdvertiser = mdnsAdvertiser;
             _postgresManager = postgresManager;
             _dbManager = dbManager;
-            // var envBaseUrl = Environment.GetEnvironmentVariable("DJANGO_BASEURL");
-            // _djangoBaseUrl = string.IsNullOrWhiteSpace(envBaseUrl)
-            //     ? "http://localhost:8000"
-            //     : envBaseUrl.Trim();
-
+            _udpDiscoveryService = udpDiscoveryService;
             _djangoBaseUrl =
                 configuration.GetValue<string>("Django:BaseUrl") ?? "http://localhost:8000";
 
@@ -125,7 +124,7 @@ namespace MyLanService
                 }
             );
 
-            // ✅ Load encrypted license info & init license manager
+            // Load encrypted license info & init license manager
             var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
             _logger.LogInformation(
                 "License Loaded: {LicenseInfo}",
@@ -158,8 +157,8 @@ namespace MyLanService
                         </head>
                         <body>
                             <div class="status">
-                                ✅ <strong>Status:</strong> OK<br />
-                                💬 <strong>Message:</strong> HTTP Health Check Passed
+                                &#x2705; <strong>Status:</strong> OK<br />
+                                &#x1F4AC; <strong>Message:</strong> HTTP Health Check Passed
                             </div>
                         </body>
                         </html>
@@ -209,25 +208,11 @@ namespace MyLanService
                             Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
                             ?? "Production";
 
-                        // var dataDir =
-                        //     env == "Development"
-                        //         ? Path.Combine(Directory.GetCurrentDirectory(), "pgdata")
-                        //         : Path.Combine(AppContext.BaseDirectory, "pgdata");
                         var dataDir = _licenseHelper.GetDatabaseDataDirectory();
 
                         _logger.LogInformation("Data directory: {DataDir}", dataDir);
 
-                        // var dataDir = "/usr/local/var/CyphersolDev/pgdata";
-
                         _logger.LogInformation("Instance ID: {InstanceId}", InstanceId);
-
-                        // using var server = new PgServer(
-                        //     "15.3.0",
-                        //     dbDir: dataDir,
-                        //     port: 5432,
-                        //     instanceId: InstanceId
-                        // );
-                        // await server.StartAsync();
 
                         // Start PostgreSQL and save config in parallel
                         var startPgServerTask = _postgresManager.StartAsync(
@@ -319,9 +304,10 @@ namespace MyLanService
                             "postgres",
                             requestBody.User,
                             requestBody.Password,
-                            requestBody.Host,
+                            "127.0.0.1",
                             requestBody.Port
                         );
+                        _logger.LogInformation("Connection string: {ConnectionString}", cs);
                         await using var conn = new NpgsqlConnection(cs);
                         await conn.OpenAsync();
                         _logger.LogInformation(
@@ -366,6 +352,17 @@ namespace MyLanService
                         await _dbManager.MigrateAsync();
                         statusStore.AddInfoLog("Migrations applied successfully.");
                         _logger.LogInformation("Migrations applied successfully.");
+
+                        // Advertise the PostgreSQL database via mDNS after migrations are completed
+                        _mdnsAdvertiser.AdvertiseDatabaseService(InstanceId, 5432, "17.4.0");
+
+                        // Enable UDP discovery for PostgreSQL database
+                        _udpDiscoveryService.EnableDatabaseDiscovery(
+                            InstanceId.ToString(),
+                            5432,
+                            "17.4.0"
+                        );
+
                         statusStore.SetStatus("completed", null, 100);
                         return Results.Ok(new { success = true });
                     }

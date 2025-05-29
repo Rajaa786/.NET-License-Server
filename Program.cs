@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using MyLanService;
 using MyLanService.Database;
 using MyLanService.Middlewares;
+using MyLanService.Services;
 using MyLanService.Utils;
 using Serilog;
 using Serilog.Settings.Configuration;
@@ -80,6 +81,9 @@ try
                 services.AddSingleton<EncryptionUtility>();
                 services.AddSingleton<EmbeddedPostgresManager>();
                 services.AddSingleton<DatabaseManager>();
+                // Register network discovery services
+                services.AddSingleton<MdnsAdvertiser>();
+                services.AddSingleton<UdpDiscoveryService>();
                 services.AddDbContext<ApplicationDbContext>(
                     (sp, options) =>
                     {

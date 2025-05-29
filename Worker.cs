@@ -12,6 +12,7 @@ using Makaretu.Dns;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MyLanService.Database;
+using MyLanService.Services;
 using MyLanService.Utils;
 
 namespace MyLanService
@@ -26,12 +27,8 @@ namespace MyLanService
         private const int TcpPort = 5000;
         private const int HttpPort = 7890;
 
-        private const int UdpPort = 41234;
-        private UdpClient _udpListener;
-        private Task _udpListeningTask;
-
-        private MulticastService _mdns;
-        private ServiceDiscovery _serviceDiscovery;
+        private readonly MdnsAdvertiser _mdnsAdvertiser;
+        private readonly UdpDiscoveryService _udpDiscoveryService;
         private readonly LicenseHelper _licenseHelper;
         private readonly LicenseStateManager _licenseStateManager;
         private readonly LicenseInfoProvider _licenseInfoProvider;
@@ -48,7 +45,9 @@ namespace MyLanService
             LicenseInfoProvider licenseInfoProvider,
             IConfiguration configuration,
             EmbeddedPostgresManager postgresManager,
-            DatabaseManager dbManager
+            DatabaseManager dbManager,
+            MdnsAdvertiser mdnsAdvertiser,
+            UdpDiscoveryService udpDiscoveryService
         )
             : base()
         {
@@ -56,10 +55,12 @@ namespace MyLanService
             _licenseHelper = licenseHelper;
             _licenseStateManager = licenseStateManager;
             _licenseInfoProvider = licenseInfoProvider;
-            _udpListener = new UdpClient(new IPEndPoint(IPAddress.Any, UdpPort));
+
             _configuration = configuration;
             _postgresManager = postgresManager;
             _dbManager = dbManager;
+            _mdnsAdvertiser = mdnsAdvertiser;
+            _udpDiscoveryService = udpDiscoveryService;
             _logger.LogInformation("Worker initialized.");
         }
 
@@ -76,9 +77,8 @@ namespace MyLanService
                 await WaitForNetworkAsync(10, 3000, stoppingToken);
                 var localIP = GetLocalIPAddress();
 
-                // Use the constructor with a filter to select only the matching NIC
-                _mdns = new MulticastService();
-                _serviceDiscovery = new ServiceDiscovery(_mdns);
+                // Initialize and start the mDNS advertiser
+                _mdnsAdvertiser.Start();
 
                 _httpApiHost = new HttpApiHost(
                     HttpPort,
@@ -87,7 +87,8 @@ namespace MyLanService
                     _licenseInfoProvider,
                     _licenseHelper,
                     _configuration,
-                    _serviceDiscovery,
+                    _mdnsAdvertiser,
+                    _udpDiscoveryService,
                     _postgresManager,
                     _dbManager
                 );
@@ -99,108 +100,24 @@ namespace MyLanService
                 var licensePollingTask = _httpApiHost.StartLicensePollingAsync(stoppingToken);
                 _logger.LogInformation("HTTP API Server started on port 7890");
 
-                _udpListeningTask = Task.Run(
-                    () => ListenForUdpBroadcastsAsync(stoppingToken),
-                    stoppingToken
-                );
-                _logger.LogInformation($"UDP broadcast listener started on port {UdpPort}.");
-
-                // _mdns.QueryReceived += (s, e) =>
-                // {
-                //     var names = e.Message.Questions.Select(q => q.Name + " " + q.Type);
-                //     Console.WriteLine($"got a query for {String.Join(", ", names)}");
-                // };
-
-                // _mdns.AnswerReceived += (s, e) =>
-                // {
-                //     var names = e.Message.Answers
-                //         .Select(q => q.Name + " " + q.Type)
-                //         .Distinct();
-                //     Console.WriteLine($"got answer for {String.Join(", ", names)}");
-                // };
-
-                _mdns.QueryReceived += (s, e) =>
-                {
-                    var relevantQueries = e
-                        .Message.Questions.Where(q =>
-                            q.Name == "_license-server._tcp.local" && q.Type == DnsType.PTR
-                        )
-                        .Select(q => $"{q.Name} {q.Type}");
-
-                    foreach (var query in relevantQueries)
-                    {
-                        _logger.LogInformation($"got query for {query}");
-                    }
-                };
-
-                _mdns.AnswerReceived += (s, e) =>
-                {
-                    var relevantAnswers = e
-                        .Message.Answers.Where(ans =>
-                            ans.Name == "_license-server._tcp.local" && ans.Type == DnsType.PTR
-                        )
-                        .Select(ans => $"{ans.Name} {ans.Type}")
-                        .Distinct();
-
-                    foreach (var answer in relevantAnswers)
-                    {
-                        _logger.LogInformation($"got answer for {answer}");
-                    }
-                };
-
-                // _mdns.NetworkInterfaceDiscovered += (s, e) =>
-                // {
-                //     foreach (var nic in e.NetworkInterfaces)
-                //     {
-                //         Console.WriteLine($"discovered NIC '{nic.Name}'");
-                //     }
-                // };
-
+                // Start UDP discovery service
+                _udpDiscoveryService.Start();
+                _logger.LogInformation("UDP discovery service started.");
 
                 // Get system hostname and local network IP address.
                 string systemHostname = Dns.GetHostName();
 
                 _logger.LogInformation($"IP address: {localIP}");
 
-                // Create a service profile with your hostname and port.
-                var serviceProfile = new ServiceProfile(
-                    instanceName: systemHostname,
-                    serviceName: "_license-server._tcp",
-                    port: HttpPort
-                );
+                // Advertise the license server via mDNS
+                var serviceProfile = _mdnsAdvertiser.AdvertiseLicenseService(HttpPort);
+                _mdnsAdvertiser.Start();
 
-                serviceProfile.AddProperty("description", "My TCP Server Service");
-                serviceProfile.AddProperty("ttl", "300");
-
-                // Advertise the service via mDNS.
-                _serviceDiscovery.Advertise(serviceProfile);
-                _mdns.Start();
                 _logger.LogInformation(
                     $"mDNS advertisement started using hostname: {systemHostname} and IP: {localIP}:{HttpPort}"
                 );
 
-                _ = Task.Run(
-                    async () =>
-                    {
-                        while (!stoppingToken.IsCancellationRequested)
-                        {
-                            try
-                            {
-                                _logger.LogInformation("Re-advertising mDNS service...");
-                                _serviceDiscovery.Advertise(serviceProfile);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(
-                                    $"Failed to re-advertise mDNS service: {ex.Message}"
-                                );
-                            }
-
-                            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); // re-advertise every 60 seconds
-                        }
-                    },
-                    stoppingToken
-                );
+                // Note: re-advertisement is now handled automatically by the MdnsAdvertiser class
 
                 await Task.WhenAll(licensePollingTask, httpTask);
             }
@@ -211,61 +128,7 @@ namespace MyLanService
             finally
             {
                 _tcpApiServer?.Stop();
-                _serviceDiscovery?.Dispose();
-                _mdns?.Stop();
-                _mdns?.Dispose();
-            }
-        }
-
-        private async Task ListenForUdpBroadcastsAsync(CancellationToken stoppingToken)
-        {
-            IPEndPoint remoteEndpoint = new IPEndPoint(IPAddress.Any, 0);
-
-            try
-            {
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    UdpReceiveResult received = await _udpListener.ReceiveAsync();
-                    string message = Encoding.UTF8.GetString(received.Buffer);
-
-                    _logger.LogInformation(
-                        $"UDP broadcast received from {received.RemoteEndPoint}: {message}"
-                    );
-
-                    // Example check for a discovery query
-                    if (message.Trim() == "DISCOVER_LICENSE_SERVER")
-                    {
-                        var ipAddress = (
-                            _udpListener.Client.LocalEndPoint as IPEndPoint
-                        )?.Address.ToString();
-
-                        var responseObj = new
-                        {
-                            name = "LicenseServer",
-                            host = Dns.GetHostName(),
-                            ip = ipAddress,
-                            port = HttpPort,
-                        };
-
-                        string response = JsonSerializer.Serialize(responseObj);
-                        byte[] responseBytes = Encoding.UTF8.GetBytes(response);
-                        await _udpListener.SendAsync(
-                            responseBytes,
-                            responseBytes.Length,
-                            received.RemoteEndPoint
-                        );
-
-                        _logger.LogInformation($"Responded to UDP discovery with: {response}");
-                    }
-                }
-            }
-            catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
-            {
-                // Listener was closed as part of shutdown, ignore.
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in UDP listener");
+                _mdnsAdvertiser.Stop();
             }
         }
 
@@ -368,15 +231,8 @@ namespace MyLanService
                 }
 
                 _tcpApiServer?.Stop();
-                _serviceDiscovery?.Dispose();
-
-                if (_mdns is not null)
-                {
-                    _logger.LogInformation("Stopping mDNS service...");
-                    _mdns.Stop();
-                    _logger.LogInformation("mDNS service stopped.");
-                    _mdns.Dispose();
-                }
+                _mdnsAdvertiser.Stop();
+                _udpDiscoveryService.Stop();
                 _licenseStateManager?.Flush();
             }
             catch (Exception ex)
