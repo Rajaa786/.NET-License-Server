@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using MyLanService.Services;
 using MyLanService.Utils;
 using MysticMind.PostgresEmbed;
 using Npgsql;
@@ -13,6 +14,7 @@ namespace MyLanService
         readonly ILogger<EmbeddedPostgresManager> _logger;
         readonly LicenseHelper _licenseHelper;
         PgServer _server;
+        private readonly MdnsAdvertiser _mdnsAdvertiser;
         int _port;
         Guid _instanceId;
 
@@ -32,11 +34,13 @@ namespace MyLanService
 
         public EmbeddedPostgresManager(
             ILogger<EmbeddedPostgresManager> logger,
-            LicenseHelper licenseHelper
+            LicenseHelper licenseHelper,
+            MdnsAdvertiser mdnsAdvertiser
         )
         {
             _logger = logger;
             _licenseHelper = licenseHelper;
+            _mdnsAdvertiser = mdnsAdvertiser;
         }
 
         public async Task StartAsync(string version, int port, Guid InstanceId, string dbDir = "")
@@ -75,20 +79,14 @@ namespace MyLanService
             this._port = port;
             this._instanceId = InstanceId;
 
-            // Configure pg_hba.conf to allow LAN access
-            await ConfigurePgAccessControlAsync(dbDir);
-
-            _logger.LogInformation(
-                "Embedded Postgres is now running on port {Port} and configured for LAN access",
-                port
-            );
+            _logger.LogInformation("Embedded Postgres is now running on port {Port}", port);
         }
 
         /// <summary>
         /// Configures PostgreSQL's pg_hba.conf to allow connections from local LAN networks
         /// and reloads the configuration
         /// </summary>
-        private async Task ConfigurePgAccessControlAsync(string dbDir)
+        public async Task ConfigurePgAccessControlAsync(string dbDir)
         {
             if (_server == null)
             {
@@ -452,6 +450,30 @@ namespace MyLanService
                     config.InstanceId,
                     config.DataDirectory
                 );
+
+                // Advertise the PostgreSQL database service via mDNS
+                try
+                {
+                    _mdnsAdvertiser.AdvertiseDatabaseService(
+                        config.InstanceId,
+                        config.Port,
+                        config.PostgresVersion
+                    );
+                    _logger.LogInformation(
+                        "PostgreSQL database service advertised via mDNS on port {Port} with instance ID {InstanceId}",
+                        config.Port,
+                        config.InstanceId
+                    );
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to advertise PostgreSQL database service via mDNS: {Message}",
+                        ex.Message
+                    );
+                    // Continue even if mDNS advertisement fails
+                }
 
                 _logger.LogInformation(
                     "PostgreSQL server auto-started successfully from saved configuration"

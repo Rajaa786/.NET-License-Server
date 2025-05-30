@@ -132,6 +132,52 @@ namespace MyLanService
             );
 
             app.MapGet(
+                "/api/license/sessions",
+                () =>
+                {
+                    try
+                    {
+                        // Get active and inactive license sessions
+                        var activeLicenses = _licenseStateManager.GetActiveLicensesWithKey();
+                        var inactiveLicenses = _licenseStateManager.GetInactiveLicensesWithKey();
+                        var allLicenses = activeLicenses.Concat(inactiveLicenses).ToList();
+
+                        // Get total number of users from license info
+                        var totalLicenses = _licenseStateManager._maxLicenses;
+
+                        _logger.LogInformation(
+                            "Sessions API request: Found {ActiveCount} active sessions, {InactiveCount} inactive sessions, total licenses: {TotalLicenses}",
+                            activeLicenses.Count(),
+                            inactiveLicenses.Count(),
+                            totalLicenses
+                        );
+
+                        // Return all license information including counts
+                        return Results.Json(
+                            new
+                            {
+                                // sessions = allLicenses,
+                                activeSessions = activeLicenses,
+                                inactiveSessions = inactiveLicenses,
+                                totalLicenses = totalLicenses,
+                                // activeCount = activeLicenses.Count(),
+                                // inactiveCount = inactiveLicenses.Count(),
+                                // totalCount = allLicenses.Count(),
+                            }
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error retrieving session data");
+                        return Results.Json(
+                            new { error = "Failed to retrieve session data", message = ex.Message },
+                            statusCode: StatusCodes.Status500InternalServerError
+                        );
+                    }
+                }
+            );
+
+            app.MapGet(
                 "/api/health",
                 () =>
                 {
@@ -251,6 +297,13 @@ namespace MyLanService
                         // Wait for both tasks
                         await Task.WhenAll(startPgServerTask, saveConfigTask);
 
+                        // Configure pg_hba.conf to allow LAN access
+                        await _postgresManager.ConfigurePgAccessControlAsync(dataDir);
+
+                        _logger.LogInformation(
+                            "Embedded Postgres is now configured for LAN access"
+                        );
+
                         statusStore.AddInfoLog(
                             "PostgreSQL binaries downloaded and server started successfully."
                         );
@@ -304,7 +357,7 @@ namespace MyLanService
                             "postgres",
                             requestBody.User,
                             requestBody.Password,
-                            "127.0.0.1",
+                            requestBody.Host,
                             requestBody.Port
                         );
                         _logger.LogInformation("Connection string: {ConnectionString}", cs);
@@ -456,8 +509,9 @@ namespace MyLanService
                         listener.Stop();
                         return Results.Ok(new { success = true });
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        _logger.LogError("Firewall test failed: {Exception}", ex.Message);
                         return Results.Ok(new { success = false });
                     }
                 }
