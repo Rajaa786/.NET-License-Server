@@ -1580,14 +1580,16 @@ namespace MyLanService
                 if (response.IsSuccessStatusCode)
                 {
                     var responseContent = await response.Content.ReadAsStringAsync();
-                    var result = JsonSerializer.Deserialize<LicenseStatusResponse>(responseContent);
+                    var result = JsonSerializer.Deserialize<LicenseInfo>(responseContent);
 
                     _logger.LogInformation($"[License Polling] Expiry: {result.ExpiryTimestamp}");
 
                     _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
                     _licenseInfoProvider.SetServerCurrentTime(result.CurrentTimestamp);
                     _licenseInfoProvider.SetSystemUpTime(Environment.TickCount64);
-                    // _licenseInfoProvider.SetNumberOfStatements = result.NumStatements;
+                    _licenseInfoProvider.GetLicenseInfo().NumberOfStatements =
+                        result.NumberOfStatements;
+                    _licenseInfoProvider.GetLicenseInfo().NumberOfUsers = result.NumberOfUsers;
 
                     _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
 

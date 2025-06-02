@@ -59,7 +59,6 @@ namespace MyLanService
 
             _activeLicenses = new ConcurrentDictionary<string, LicenseSession>();
             LoadSessionsFromDisk();
-
         }
 
         private bool IsUnlimitedStatements => _licenseInfo?.NumberOfStatements == -1;
@@ -308,9 +307,6 @@ namespace MyLanService
             }
         }
 
-
-
-
         public int ActiveCount => _activeLicenses.Count;
         public string[] ActiveClients => _activeLicenses.Keys.ToArray();
 
@@ -374,7 +370,9 @@ namespace MyLanService
             {
                 if (_licenseInfo == null)
                 {
-                    _logger.LogInformation("[IsStatementLimitReached] License info is not available.");
+                    _logger.LogInformation(
+                        "[IsStatementLimitReached] License info is not available."
+                    );
                     return true; // Fail safe: assume limit is reached
                 }
 
@@ -397,12 +395,13 @@ namespace MyLanService
             {
                 var allSessions = _activeLicenses.Values.ToList();
 
-                if (allSessions.Count == 0) return;
+                if (allSessions.Count == 0)
+                    return;
 
-                var json = JsonSerializer.Serialize(allSessions, new JsonSerializerOptions
-                {
-                    WriteIndented = false
-                });
+                var json = JsonSerializer.Serialize(
+                    allSessions,
+                    new JsonSerializerOptions { WriteIndented = false }
+                );
 
                 var encryptedBytes = _licenseHelper.GetEncryptedBytes(json);
                 var filePath = _licenseHelper.GetSessionCacheFilePath();
@@ -414,8 +413,6 @@ namespace MyLanService
                 _logger.LogError($"Error saving sessions to disk: {ex.Message}", ex);
             }
         }
-
-
 
         public void LoadSessionsFromDisk()
         {
@@ -432,11 +429,13 @@ namespace MyLanService
                 var encryptedBytes = _licenseHelper.ReadBytesSync(filePath);
                 var decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
 
-                if (string.IsNullOrWhiteSpace(decryptedJson)) return;
+                if (string.IsNullOrWhiteSpace(decryptedJson))
+                    return;
 
                 var sessions = JsonSerializer.Deserialize<List<LicenseSession>>(decryptedJson);
 
-                if (sessions == null) return;
+                if (sessions == null)
+                    return;
 
                 foreach (var session in sessions)
                 {
@@ -451,7 +450,6 @@ namespace MyLanService
                 _logger.LogError($"Failed to load session cache: {ex.Message}", ex);
             }
         }
-
 
         /// <summary>
         /// Flushes the current used statements back to disk.
@@ -527,7 +525,6 @@ namespace MyLanService
                 _logger.LogError($"[FlushToDisk] Failed to write license file: {ex}");
             }
         }
-
 
         /// <summary>
         /// Public method to flush the current license state to disk.
