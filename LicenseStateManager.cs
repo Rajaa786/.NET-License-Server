@@ -19,6 +19,54 @@ namespace MyLanService
         public DateTime AssignedAt { get; set; }
         public DateTime? LastHeartbeat { get; set; }
         public bool Active { get; set; } = false;
+
+        public override string ToString()
+        {
+            // Create a custom object with formatted dates for display only
+            var displayInfo = new
+            {
+                SessionId = this.SessionId,
+                ClientId = this.ClientId,
+                UUID = this.UUID,
+                Hostname = this.Hostname,
+                Username = this.Username,
+                MACAddress = this.MACAddress,
+                // Format the DateTime values in IST
+                AssignedAtIST = ConvertToIst(this.AssignedAt),
+                LastHeartbeatIST = this.LastHeartbeat.HasValue
+                    ? ConvertToIst(this.LastHeartbeat.Value)
+                    : "None",
+                // Include raw dates for debugging
+                AssignedAt = this.AssignedAt,
+                LastHeartbeat = this.LastHeartbeat,
+                Active = this.Active,
+            };
+
+            return System.Text.Json.JsonSerializer.Serialize(
+                displayInfo,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }
+            );
+        }
+
+        // Helper method to convert DateTime to IST formatted string
+        private string ConvertToIst(DateTime utcDateTime)
+        {
+            try
+            {
+                // IST is UTC+5:30
+                TimeSpan istOffset = new TimeSpan(5, 30, 0);
+
+                // Convert to IST by adding the offset
+                DateTime istDateTime = utcDateTime.Add(istOffset);
+
+                // Format with date and time
+                return istDateTime.ToString("dd-MMM-yyyy hh:mm:ss tt") + " IST";
+            }
+            catch
+            {
+                return "Invalid date";
+            }
+        }
     }
 
     public class LicenseStateManager

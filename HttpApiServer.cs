@@ -731,56 +731,115 @@ namespace MyLanService
                 "/api/validate-license",
                 async (HttpContext context) =>
                 {
+                    _logger.LogInformation("License validation request received");
                     try
                     {
-                        var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-                        string appFolder =
-                            (
-                                !string.IsNullOrWhiteSpace(env)
-                                && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
-                            )
-                                ? "CyphersolDev" // Use a development-specific folder name
-                                : "Cyphersol"; // Use the production folder name
+                        // var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+                        // string appFolder =
+                        //     (
+                        //         !string.IsNullOrWhiteSpace(env)
+                        //         && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                        //     )
+                        //         ? "CyphersolDev" // Use a development-specific folder name
+                        //         : "Cyphersol"; // Use the production folder name
 
-                        var licenseFilePath = _licenseHelper.GetLicenseFilePath(appFolder);
+                        // var licenseFilePath = _licenseHelper.GetLicenseFilePath(appFolder);
 
-                        byte[] encryptedBytes = null;
-                        try
+                        // byte[] encryptedBytes = null;
+                        // try
+                        // {
+                        //     encryptedBytes = await _licenseHelper.ReadBytesAsync(licenseFilePath);
+                        //     _logger.LogInformation(
+                        //         $"Successfully read encrypted license from {licenseFilePath}"
+                        //     );
+                        // }
+                        // catch (Exception ex)
+                        // {
+                        //     _logger.LogError(
+                        //         $"Error reading encrypted license file: {ex.Message}",
+                        //         ex
+                        //     );
+                        //     throw new Exception();
+                        // }
+
+                        // string? decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
+                        // {
+                        //     return Results.Json(
+                        //         new
+                        //         {
+                        //             status = "INVALID",
+                        //             message = "Invalid license key",
+                        //             license_key = licenseInfo.LicenseKey,
+                        //             expiry_timestamp = licenseInfo.ExpiryTimestamp,
+                        //             current_timestamp = licenseInfo.CurrentTimestamp,
+                        //         },
+                        //         statusCode: StatusCodes.Status400BadRequest
+                        //     );
+                        // }
+
+                        _logger.LogDebug("Retrieving license information");
+                        licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+                        if (licenseInfo == null)
                         {
-                            encryptedBytes = await _licenseHelper.ReadBytesAsync(licenseFilePath);
-                            _logger.LogInformation(
-                                $"Successfully read encrypted license from {licenseFilePath}"
+                            _logger.LogWarning("License validation failed: License not found");
+                            return Results.Json(
+                                new
+                                {
+                                    status = "ERROR",
+                                    message = "License not found. Please activate the license.",
+                                },
+                                statusCode: StatusCodes.Status404NotFound
                             );
                         }
-                        catch (Exception ex)
+
+                        _logger.LogDebug("License found, beginning validation");
+
+                        // Validate license key
+                        if (string.IsNullOrWhiteSpace(licenseInfo.LicenseKey))
                         {
-                            _logger.LogError(
-                                $"Error reading encrypted license file: {ex.Message}",
-                                ex
+                            _logger.LogWarning(
+                                "License validation failed: Empty or invalid license key"
                             );
-                            throw new Exception();
+                            return Results.Json(
+                                new
+                                {
+                                    status = "INVALID",
+                                    message = "License key is invalid",
+                                    license_key = licenseInfo.LicenseKey,
+                                    expiry_timestamp = licenseInfo.ExpiryTimestamp,
+                                    current_timestamp = licenseInfo.CurrentTimestamp,
+                                },
+                                statusCode: StatusCodes.Status400BadRequest
+                            );
                         }
 
-                        string? decryptedJson = _licenseHelper.GetDecryptedLicense(encryptedBytes);
+                        _logger.LogDebug(
+                            "License key is valid: {LicenseKey}",
+                            licenseInfo.LicenseKey
+                        );
 
-                        var jsonDoc = JsonDocument.Parse(decryptedJson);
-                        var root = jsonDoc.RootElement;
+                        // Validate timestamps using GetEffectiveTimestamp to handle clock tampering
+                        var expiryTimestamp = licenseInfo.ExpiryTimestamp;
+                        // Get effective timestamp that accounts for potential clock tampering
+                        var currentTimestamp = _licenseHelper.GetEffectiveTimestamp(
+                            licenseInfo,
+                            ReportClockTamperingAsync
+                        );
 
-                        var expiryElement = root.GetProperty("expiry_timestamp");
-                        long expiryTimestamp = expiryElement.ValueKind switch
+                        _logger.LogDebug(
+                            "Checking license expiry: Effective Current={CurrentTimestamp}, Expiry={ExpiryTimestamp}, Remaining={RemainingSeconds} seconds",
+                            currentTimestamp,
+                            expiryTimestamp,
+                            expiryTimestamp - currentTimestamp
+                        );
+
+                        if (expiryTimestamp <= currentTimestamp) // Using <= to catch exact expiry
                         {
-                            JsonValueKind.Number => (long)expiryElement.GetDouble(),
-                            JsonValueKind.String
-                                when double.TryParse(expiryElement.GetString(), out var val) =>
-                                (long)val,
-                            _ => throw new FormatException(
-                                "expiry_timestamp is not a valid number."
-                            ),
-                        };
-                        long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-
-                        if (expiryTimestamp < currentTimestamp)
-                        {
+                            _logger.LogWarning(
+                                "License validation failed: License expired. Current={CurrentTimestamp}, Expiry={ExpiryTimestamp}",
+                                currentTimestamp,
+                                expiryTimestamp
+                            );
                             return Results.Json(
                                 new
                                 {
@@ -793,34 +852,60 @@ namespace MyLanService
                             );
                         }
 
+                        _logger.LogDebug("License timestamp validation passed");
+
+                        // Validate user and statement limits
+                        if (licenseInfo.NumberOfUsers <= 0 || licenseInfo.NumberOfStatements <= 0)
+                        {
+                            _logger.LogWarning(
+                                "License validation failed: Invalid user or statement count. Users={Users}, Statements={Statements}",
+                                licenseInfo.NumberOfUsers,
+                                licenseInfo.NumberOfStatements
+                            );
+                            return Results.Json(
+                                new
+                                {
+                                    status = "INVALID",
+                                    message = "License is not valid",
+                                    license_key = licenseInfo.LicenseKey,
+                                    expiry_timestamp = expiryTimestamp,
+                                    current_timestamp = currentTimestamp,
+                                },
+                                statusCode: StatusCodes.Status400BadRequest
+                            );
+                        }
+
+                        _logger.LogInformation(
+                            "License validation successful: Key={LicenseKey}, Users={Users}, Statements={Statements}, ExpiresIn={RemainingSeconds} seconds",
+                            licenseInfo.LicenseKey,
+                            licenseInfo.NumberOfUsers,
+                            licenseInfo.NumberOfStatements,
+                            expiryTimestamp - currentTimestamp
+                        );
+
                         return Results.Json(
                             new
                             {
                                 status = "OK",
-                                license_key = root.GetProperty("license_key").GetString(),
-                                number_of_users = root.GetProperty("number_of_users").GetInt32(),
-                                number_of_statements = root.GetProperty("number_of_statements")
-                                    .GetInt32(),
+                                license_key = licenseInfo.LicenseKey,
+                                number_of_users = licenseInfo.NumberOfUsers,
+                                number_of_statements = licenseInfo.NumberOfStatements,
                                 expiry_timestamp = expiryTimestamp,
                                 current_timestamp = currentTimestamp,
+                                role = licenseInfo.Role,
+                                system_up_time = licenseInfo.SystemUpTime,
+                                used_statements = licenseInfo.UsedStatements,
                             },
                             statusCode: StatusCodes.Status200OK
                         );
                     }
-                    catch (FileNotFoundException)
-                    {
-                        return Results.Json(
-                            new
-                            {
-                                status = "ERROR",
-                                message = "License file not found. Please activate the license.",
-                            },
-                            statusCode: StatusCodes.Status404NotFound
-                        );
-                    }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error validating license");
+                        _logger.LogError(
+                            ex,
+                            "Error validating license: {ErrorMessage}",
+                            ex.Message
+                        );
                         return Results.Json(
                             new { status = "ERROR", message = ex.Message },
                             statusCode: StatusCodes.Status500InternalServerError
@@ -928,7 +1013,8 @@ namespace MyLanService
                             //     UsedStatements = 0, // Set used statements as needed
                             // };
 
-                            var licenseInfo = new LicenseInfo
+                            // Create LicenseInfo with required logger parameter
+                            var licenseInfo = new LicenseInfo(_logger)
                             {
                                 LicenseKey = parsedResult["license_key"]?.ToString(),
                                 CurrentTimestamp = currentTimestamp,
@@ -1582,27 +1668,111 @@ namespace MyLanService
                     var responseContent = await response.Content.ReadAsStringAsync();
                     var result = JsonSerializer.Deserialize<LicenseInfo>(responseContent);
 
+                    if (result == null)
+                    {
+                        _logger.LogError(
+                            "[License Polling] Failed to deserialize license info from response"
+                        );
+                        return false;
+                    }
+
                     _logger.LogInformation($"[License Polling] Expiry: {result.ExpiryTimestamp}");
 
-                    _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
-                    _licenseInfoProvider.SetServerCurrentTime(result.CurrentTimestamp);
-                    _licenseInfoProvider.SetSystemUpTime(Environment.TickCount64);
-                    _licenseInfoProvider.GetLicenseInfo().NumberOfStatements =
-                        result.NumberOfStatements;
-                    _licenseInfoProvider.GetLicenseInfo().NumberOfUsers = result.NumberOfUsers;
+                    // Get current license info and validate
+                    var currentLicense = _licenseInfoProvider.GetLicenseInfo();
+                    if (currentLicense == null || !currentLicense.IsValid())
+                    {
+                        _logger.LogWarning(
+                            "[License Polling] License info is invalid. Skipping update."
+                        );
+                        return false;
+                    }
 
-                    _licenseStateManager._licenseInfo = _licenseInfoProvider.GetLicenseInfo();
+                    // Update fields one by one
+                    // _licenseInfoProvider.SetExpiry(result.ExpiryTimestamp);
+                    // _licenseInfoProvider.SetServerCurrentTime(result.CurrentTimestamp);
+                    // _licenseInfoProvider.SetSystemUpTime(Environment.TickCount64);
+                    currentLicense.ExpiryTimestamp = result.ExpiryTimestamp;
+                    currentLicense.CurrentTimestamp = result.CurrentTimestamp;
+                    currentLicense.SystemUpTime = Environment.TickCount64;
+                    currentLicense.NumberOfStatements = result.NumberOfStatements;
+                    currentLicense.NumberOfUsers = result.NumberOfUsers;
 
-                    _logger.LogInformation(
-                        "[License Polling] LicenseInfo: {0}",
-                        _licenseStateManager._licenseInfo.ToString()
-                    );
-                    _logger.LogInformation(
-                        "[License Polling] LicenseInfo: {0}",
-                        _licenseInfoProvider.GetLicenseInfo().ToString()
-                    );
+                    _licenseStateManager._licenseInfo = currentLicense;
 
-                    return true;
+                    // Save to disk
+                    try
+                    {
+                        _logger.LogInformation(
+                            $"[License Polling] Saving updated license info to disk."
+                        );
+
+                        // Serialize the updated license info
+                        var enrichedJson = JsonSerializer.Serialize(currentLicense);
+                        _logger.LogInformation($"[License Polling] Enriched JSON: {enrichedJson}");
+
+                        // Get environment and determine app folder
+                        var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+                        string appFolder =
+                            (
+                                !string.IsNullOrWhiteSpace(env)
+                                && env.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                            )
+                                ? "CyphersolDev"
+                                : "Cyphersol";
+
+                        var licenseFilePath = _licenseHelper.GetLicenseFilePath(appFolder);
+
+                        // Encrypt and save
+                        byte[] encryptedBytes = null;
+                        try
+                        {
+                            encryptedBytes = _licenseHelper.GetEncryptedBytes(enrichedJson);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(
+                                $"[License Polling] Failed to encrypt license info: {ex.Message}",
+                                ex
+                            );
+                            throw new Exception("Failed to encrypt license info");
+                        }
+
+                        try
+                        {
+                            _licenseHelper.WriteBytesSync(licenseFilePath, encryptedBytes);
+                            _logger.LogInformation(
+                                "[License Polling] License information securely saved at {0}",
+                                licenseFilePath
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(
+                                $"[License Polling] Failed to write license file: {ex.Message}",
+                                ex
+                            );
+                            throw new Exception("Failed to write license file");
+                        }
+
+                        // Update LicenseStateManager
+                        _licenseStateManager._licenseInfo = currentLicense;
+
+                        _logger.LogInformation(
+                            "[License Polling] LicenseInfo updated and saved successfully: {0}",
+                            currentLicense.ToString()
+                        );
+
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(
+                            $"[License Polling] Failed to save license info: {ex}",
+                            ex
+                        );
+                        return false;
+                    }
                 }
                 else
                 {
