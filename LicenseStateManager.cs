@@ -508,7 +508,7 @@ namespace MyLanService
         {
             try
             {
-                if (_licenseInfo == null || !_licenseInfo.IsValid())
+                if (_licenseInfo == null || !_licenseInfo.IsPresent())
                 {
                     _logger.LogWarning("[FlushToDisk] License info is null. Skipping flush.");
                     return;

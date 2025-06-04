@@ -1563,7 +1563,7 @@ namespace MyLanService
 
         private async Task PollLicenseStatusAsync(CancellationToken stoppingToken)
         {
-            var checkInterval = TimeSpan.FromSeconds(3600);
+            var checkInterval = TimeSpan.FromSeconds(120);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -1633,9 +1633,11 @@ namespace MyLanService
                 // Check if license info is present before making a request
                 var licenseInfo = _licenseInfoProvider.GetLicenseInfo();
 
-                if (licenseInfo == null || !licenseInfo.IsValid())
+                if (licenseInfo == null || !licenseInfo.IsPresent())
                 {
-                    _logger.LogWarning("[License Polling] License info is null. Skipping poll.");
+                    _logger.LogWarning(
+                        "[License Polling] License info is null or invalid. Skipping poll."
+                    );
                     return false;
                 }
 
@@ -1654,8 +1656,13 @@ namespace MyLanService
                 var requestData = new
                 {
                     license_key = licenseKey,
+                    used_statements = licenseInfo.IsValid()
+                        ? licenseInfo.UsedStatements
+                        : (int?)null,
                     // device_info = deviceInfo
                 };
+
+                _logger.LogInformation("[License Polling] Enriched JSON: {Json}", requestData);
 
                 var json = JsonSerializer.Serialize(requestData);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -1680,7 +1687,7 @@ namespace MyLanService
 
                     // Get current license info and validate
                     var currentLicense = _licenseInfoProvider.GetLicenseInfo();
-                    if (currentLicense == null || !currentLicense.IsValid())
+                    if (currentLicense == null || !currentLicense.IsPresent())
                     {
                         _logger.LogWarning(
                             "[License Polling] License info is invalid. Skipping update."
@@ -2052,7 +2059,7 @@ namespace MyLanService
             </div>
             <div class='stat-card'>
                 <h3>Total Licenses</h3>
-                <div class='stat-value'>{allSessions.Count}</div>
+                <div class='stat-value'>{_licenseStateManager._licenseInfo.NumberOfUsers}</div>
             </div>
             <div class='stat-card'>
                 <h3>Inactive Licenses</h3>

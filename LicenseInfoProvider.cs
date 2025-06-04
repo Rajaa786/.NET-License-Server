@@ -110,6 +110,11 @@ namespace MyLanService
             }
         }
 
+        public void SetLogger(ILogger logger)
+        {
+            this._logger = logger;
+        }
+
         public bool IsValid()
         {
             return !string.IsNullOrWhiteSpace(LicenseKey)
@@ -117,6 +122,18 @@ namespace MyLanService
                 && ExpiryTimestamp > CurrentTimestamp
                 && NumberOfUsers > 0
                 && NumberOfStatements != 0;
+        }
+
+        public bool IsPresent()
+        {
+            bool isPresent = !string.IsNullOrWhiteSpace(LicenseKey);
+            _logger.LogInformation("License is present: {0}", isPresent);
+            return isPresent;
+        }
+
+        public bool IsExpired()
+        {
+            return ExpiryTimestamp <= CurrentTimestamp;
         }
 
         public override string ToString()
@@ -328,6 +345,8 @@ namespace MyLanService
 
                 // Deserialize from JSON - will use the parameterless constructor
                 var licenseInfo = JsonSerializer.Deserialize<LicenseInfo>(decryptedJson);
+
+                licenseInfo.SetLogger(_logger);
 
                 if (licenseInfo == null)
                 {
