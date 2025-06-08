@@ -1789,7 +1789,7 @@ namespace MyLanService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[License Polling] Exception occurred");
+                _logger.LogError(ex.Message, "[License Polling] Exception occurred");
                 return false;
             }
         }

@@ -17,18 +17,23 @@ using Serilog.Sinks.File;
 
 // Determine environment and set appropriate log directory
 var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
+Console.WriteLine($"Starting in environment: {environment}");
+
 string logBaseDir = environment.Equals("Development", StringComparison.OrdinalIgnoreCase)
     ? Directory.GetCurrentDirectory() // Use project directory in development
     : AppContext.BaseDirectory; // Use executable directory in production
 
 var logPath = Path.Combine(logBaseDir, "logs", "gateway", "gateway_.txt");
 var logDir = Path.GetDirectoryName(logPath);
+Console.WriteLine($"Log directory: {logDir}");
+Console.WriteLine($"Log path: {logPath}");
 
 if (!environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
 {
     // Ensure directory exists
     if (!Directory.Exists(logDir))
     {
+        Console.WriteLine("Creating log directory as it doesn't exist");
         Directory.CreateDirectory(logDir);
     }
 
@@ -56,6 +61,7 @@ if (!environment.Equals("Development", StringComparison.OrdinalIgnoreCase))
 }
 else
 {
+    Console.WriteLine("Creating console logger");
     Log.Logger = new LoggerConfiguration().WriteTo.Console().CreateLogger();
 }
 
