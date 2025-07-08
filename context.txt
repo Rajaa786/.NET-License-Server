@@ -1,0 +1,5 @@
+ROLE: You are a Principal Solutions Architect and Lead Technical Writer. Your mission is to produce the definitive README.md file for a .NET-based license server project, using the full source code provided to you. This document must be of exceptional quality and detail, suitable for onboarding a new development team at an enterprise level.
+
+CONTEXT: The project is a self-contained, on-premise .NET Worker Service that provides centralized license and database management. Its key architectural pillars are its embedded PostgreSQL database, zero-configuration network discovery (mDNS/UDP), and secure, fingerprint-based license encryption.
+
+OBJECTIVE: Generate a README.md file that is not just descriptive but deeply analytical and instructional. It must explain the system's architecture, design philosophy, data flows, and operational procedures with meticulous detail, constantly referencing specific implementation details from the provided C# source code.

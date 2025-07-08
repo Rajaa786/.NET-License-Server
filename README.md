@@ -1,6 +1,8 @@
-# .NET Centralized DB & License Server
+# .NET Centralized DB & License Server: Architectural & Operational Guide
 
-A self-hosted .NET service providing centralized license and database management for client applications on a local network. This enterprise-grade solution features embedded PostgreSQL, zero-configuration network discovery, and robust fingerprint-based license encryption, designed for on-premise deployment with minimal setup requirements.
+## Executive Summary
+
+This project delivers a self-hosted, on-premise .NET Worker Service that provides centralized license and database management for client applications within local network environments. Designed specifically for organizations requiring minimal setup complexity and maximum operational autonomy, the system eliminates traditional infrastructure dependencies through its embedded PostgreSQL database, automatic network discovery protocols, and machine-bound license encryption. The solution embodies an "appliance" deployment model, where a single executable provides complete database and licensing services without requiring dedicated database administrators, complex network configurations, or external service dependencies.
 
 ## Core Features
 
@@ -10,6 +12,35 @@ A self-hosted .NET service providing centralized license and database management
 - **Robust Session Management:** Provides real-time tracking of active and inactive license sessions with a thread-safe state manager.
 - **Automated Database Schema Management:** Leverages Entity Framework Core Migrations to automatically create and update the database schema on startup.
 - **RESTful API for Control:** Exposes a clear set of HTTP endpoints for all license, session, and database provisioning operations.
+
+## Architectural Philosophy & Design Principles
+
+The system architecture is guided by three fundamental principles that directly address the challenges of enterprise software deployment and management in diverse network environments.
+
+### Principle of Self-Containment (The "Appliance" Model)
+
+**Why?** To eliminate external dependencies and simplify deployment for non-technical users. Traditional database-dependent applications require separate database server installation, configuration, and ongoing maintenance by skilled administrators.
+
+**How?** By integrating an embedded database using **`MysticMind.PostgresEmbed`**. This removes the need for a separate database administrator. The `EmbeddedPostgresManager.cs` automatically downloads PostgreSQL binaries (version **17.4.0**) and manages the complete database lifecycle in the `pgdata` directory. The server handles binary acquisition, configuration file generation, process lifecycle management, and network access control modifications—all transparently to the end user.
+
+### Principle of Zero-Configuration Networking
+
+**Why?** To ensure client applications can find and connect to the server on a LAN without manual IP address configuration, DNS setup, or network topology knowledge. This eliminates a major deployment friction point in enterprise environments.
+
+**How?** Through a dual-protocol discovery mechanism that provides redundancy and cross-platform compatibility:
+
+1. **mDNS (Bonjour):** The `MdnsAdvertiser.cs` broadcasts standard service types (`_license-server._tcp.local`, `_postgresql._tcp.local`) using the `Makaretu.Dns` library for seamless cross-platform discovery.
+2. **UDP Broadcast:** The `UdpDiscoveryService.cs` provides a fallback mechanism, listening on port **41234** for a specific query string (`DISCOVER_LICENSE_SERVER`) and responding with JSON-formatted service information.
+
+### Principle of Secure by Default & Defense-in-Depth
+
+**Why?** To ensure license integrity and make the license non-transferable between machines, preventing software piracy and unauthorized usage while maintaining user convenience.
+
+**How?** This is achieved through three complementary layers of security:
+
+1. **Device Fingerprinting:** The `LicenseHelper.cs` generates a unique fingerprint from multiple system identifiers (machine name, user SID on Windows, UID on macOS, SMBIOS UUID), cryptographically tying the license to specific hardware.
+2. **Robust Encryption:** The `EncryptionUtility.cs` uses this fingerprint to derive a key for **AES-256 (CBC mode, PKCS7 padding)** encryption. The key is derived using `Rfc2898DeriveBytes` (PBKDF2) with **100,000 iterations** and a hardcoded salt, providing resistance against rainbow table and brute-force attacks.
+3. **Request Middleware:** The `LicenseExpiryMiddleware.cs` acts as a gatekeeper for all API requests, validating the server's own license validity, expiry status, and detecting potential clock tampering _before_ processing any client requests.
 
 ## System Architecture
 
@@ -72,13 +103,13 @@ graph TD
     class HttpApi,Middleware,Mdns,Udp component;
 ```
 
-**Component Breakdown:**
+**Component Breakdown (Enhanced):**
 
-- **HttpApiServer.cs:** Acts as the primary interface for clients, utilizing ASP.NET Core to host a web server that defines all RESTful endpoints (e.g., `/api/license`, `/db/provision`). This component is initialized and managed by `Worker.cs` and serves as the main communication gateway for all client interactions. It handles HTTP requests on port 7890 and coordinates with other system components to process license assignments, session management, and database operations.
+- **`HttpApiServer.cs`:** The primary entry point hosted by `Worker.cs`, using ASP.NET Core Minimal APIs on port **7890**. This component implements the `HttpApiHost` class that manages the complete web server lifecycle, from `WebApplication.CreateBuilder()` initialization through endpoint mapping and graceful shutdown. It coordinates with dependency injection to access `LicenseStateManager`, `LicenseInfoProvider`, and database services, serving as the orchestration layer for all client-server interactions.
 
-- **LicenseExpiryMiddleware.cs:** Functions as a critical security gatekeeper that intercepts all incoming HTTP requests to validate the server's own license before processing client requests. This middleware performs comprehensive checks including license validity, expiry validation, and clock tampering detection. It maintains a list of excluded endpoints (like `/api/activate-license`, `/api/health`) that bypass license validation, ensuring system bootstrapping can occur without circular dependencies.
+- **`LicenseExpiryMiddleware.cs`:** A security control that intercepts requests through ASP.NET Core's middleware pipeline, checking an `excludedPaths` list (`["/api/activate-license", "/api/health", "/db/provision/download", "/db/migrations/run"]`) before validating the server's license for validity, expiry, and clock tampering. The middleware implements sophisticated clock tampering detection by comparing `Environment.TickCount64` values and system timestamps, with automatic license re-synchronization when discrepancies exceed 2 hours or 600 seconds respectively.
 
-- **MdnsAdvertiser.cs & UdpDiscoveryService.cs:** These services implement the "zero-configuration" networking magic that makes the server discoverable on the local network. `MdnsAdvertiser` broadcasts a `_license-server._tcp.local` service using the Bonjour protocol, while `UdpDiscoveryService` listens for and responds to specific UDP broadcast queries (`DISCOVER_LICENSE_SERVER`) on port 41234. This dual approach ensures compatibility across different network environments and client discovery mechanisms.
+- **`MdnsAdvertiser.cs` & `UdpDiscoveryService.cs`:** Background services for network presence advertisement. `MdnsAdvertiser` uses the `Makaretu.Dns` library for standards-compliant mDNS broadcasting with automatic re-advertisement every 60 seconds and service profile management in a `Dictionary<string, ServiceProfile>`. `UdpDiscoveryService` listens on UDP port **41234** for discovery queries, responding with JSON-encoded service information including hostname, IP address, and service ports for both license server and database services.
 
 ---
 
@@ -106,13 +137,13 @@ graph TD
     class StateManager,InfoProvider,Security component;
 ```
 
-**Component Breakdown:**
+**Component Breakdown (Enhanced):**
 
-- **LicenseStateManager.cs:** Serves as the "brain" of the license operation, managing a thread-safe `ConcurrentDictionary<string, LicenseSession>` that tracks all active and inactive license sessions. This component enforces the maximum user limit configured in the license, implements session lifecycle management through methods like `TryUseLicense`, `ReleaseLicense`, and `ActivateSession`, and handles statement usage counting with automatic disk flushing every 10 seconds. Each session is identified by a SHA-256 hash generated from the client's UUID, hostname, and client ID, ensuring session uniqueness and security.
+- **`LicenseStateManager.cs`:** The stateful core using a `ConcurrentDictionary<string, LicenseSession>` for thread-safety, where the session key is a **SHA256 hash** generated from normalized client UUID, hostname, and client ID in the `GenerateSessionKey()` method. This component implements sophisticated session lifecycle management with automatic persistence: it saves session state to `session-cache.enc` on application shutdown via the `SaveSessionsToDisk()` method and restores sessions (marked as inactive) on startup through `LoadSessionsFromDisk()`. The class includes a built-in flush mechanism that automatically writes license usage statistics to disk every 10 seconds using the `FlushToDisk()` method.
 
-- **LicenseInfoProvider.cs:** Functions as a singleton service that loads and caches the master `LicenseInfo` object from the encrypted file at application startup. It acts as a read-only cache for license rules and constraints, providing the rest of the application with access to license limits, expiry dates, and usage quotas. This component handles license information validation and maintains the relationship between the encrypted on-disk representation and the in-memory business objects.
+- **`LicenseInfoProvider.cs`:** A singleton service that loads the encrypted `license.enc` file once at startup via the `LoadLicenseInfo()` method, caching the `LicenseInfo` object in memory to avoid repeated I/O operations. This component serves as the authoritative source for license constraints (maximum users, statement limits, expiry dates) and implements environment-aware file path resolution, distinguishing between "CyphersolDev" and "Cyphersol" folders based on the `DOTNET_ENVIRONMENT` variable for development versus production deployments.
 
-- **LicenseHelper.cs & EncryptionUtility.cs:** These components form the security backbone of the system. `LicenseHelper` generates a unique machine fingerprint using system-specific identifiers (machine name, user SID on Windows, UID on macOS, system UUID from SMBIOS) that creates a machine-bound encryption key. `EncryptionUtility` uses this fingerprint with AES-256 encryption in CBC mode, utilizing PBKDF2 with 100,000 iterations for key derivation, ensuring that license files cannot be copied to another machine or tampered with.
+- **`LicenseHelper.cs` & `EncryptionUtility.cs`:** The security heart implementing **AES-256 in CBC mode with PKCS7 padding**, using a key derived via `Rfc2898DeriveBytes` with **100,000 iterations** and a hardcoded salt (`"YourSuperSalt!@#"`). The `LicenseHelper.GetFingerprint()` method constructs a unique machine identifier by concatenating `Environment.MachineName`, `Environment.UserName`, Windows User SID (via `WindowsIdentity.GetCurrent().User.Value`), macOS UID (via P/Invoke to `getuid()`), and SMBIOS system UUID from WMI queries, creating a cryptographically bound license that cannot be transferred between machines.
 
 ---
 
@@ -141,13 +172,13 @@ graph TD
     class PgManager,DbContext,DbManager component;
 ```
 
-**Component Breakdown:**
+**Component Breakdown (Enhanced):**
 
-- **EmbeddedPostgresManager.cs:** This sophisticated component downloads, installs, and manages a complete PostgreSQL server instance (version 17.4.0) that runs embedded within the application process. It handles automatic PostgreSQL binary acquisition using the MysticMind.PostgresEmbed library, configures server parameters (max_connections=500, listen_addresses=\*), and critically implements `ConfigurePgAccessControlAsync` which modifies `pg_hba.conf` to allow LAN access by adding trust rules for local network subnets. This component also manages mDNS advertisement of the database service for network discovery.
+- **`EmbeddedPostgresManager.cs`:** Manages the PostgreSQL **v17.4.0** instance through the `MysticMind.PostgresEmbed` library, implementing comprehensive database lifecycle management. The component configures runtime parameters via `serverParams.Add("max_connections", "500")` and `serverParams.Add("listen_addresses", "*")` for LAN accessibility. Critically, its `ConfigurePgAccessControlAsync` method modifies `pg_hba.conf` to add `host all all <subnet> trust` rules for detected local network subnets, enabling seamless client connectivity. The class also handles automatic configuration persistence through `SaveDatabaseConfig()` and `LoadDatabaseConfig()` methods, storing server settings in a JSON configuration file for service restart scenarios.
 
-- **ApplicationDbContext.cs:** Defines the Entity Framework Core representation of the database schema, mapping business entities like `User`, `Case`, `Statement`, and `Transaction` to their corresponding PostgreSQL tables. This component establishes relationships between entities using foreign keys and implements proper cascade deletion behavior. It serves as the ORM layer that translates .NET objects to SQL queries and manages database connections through the connection string provided by `EmbeddedPostgresManager`.
+- **`ApplicationDbContext.cs`:** The EF Core schema definition using the Fluent API in the `OnModelCreating()` method to map business entities with precise database configurations. The context implements comprehensive relationship mapping with `OnDelete(DeleteBehavior.Cascade)` for maintaining referential integrity, table name mapping via `.ToTable("users")`, column name specifications through `.HasColumnName("user_id")`, and constraint definitions including required fields and default values. The context includes `DbSet<>` properties for all entities: `Users`, `Cases`, `Categories`, `Statements`, `Transactions`, and related business objects.
 
-- **DatabaseManager.cs:** Provides a simple but vital service that ensures database schema consistency. On application startup, it executes `db.Database.MigrateAsync()` to apply any pending Entity Framework Core migrations found in the `Migrations` folder. This automated approach ensures that database schema updates are applied seamlessly during application deployment and upgrades, maintaining data integrity across different versions.
+- **`DatabaseManager.cs`:** An abstraction for schema management that encapsulates Entity Framework migrations through dependency injection of `IServiceScopeFactory`. The class implements the `MigrateAsync()` method which calls `db.Database.MigrateAsync()` to apply pending migrations from the `Migrations` folder, with integrated logging and error handling. This component ensures database schema consistency across application versions and handles the critical bootstrap sequence where database availability is verified before migration execution.
 
 ## Data & Sequence Flows
 
@@ -175,7 +206,26 @@ sequenceDiagram
     HttpApiServer-->>-ClientApp: 200 OK (license active)
 ```
 
-## Setup and Operation
+### Failure Path: License Unavailable
+
+The following sequence diagram illustrates the system behavior when all license slots are occupied and a new client attempts to acquire a license:
+
+```mermaid
+sequenceDiagram
+    participant ClientApp
+    participant HttpApiServer
+    participant LicenseStateManager
+
+    ClientApp->>+HttpApiServer: POST /api/license/assign (clientId, deviceInfo)
+    HttpApiServer->>+LicenseStateManager: TryUseLicense(clientId, ...)
+    Note over LicenseStateManager: All license slots are full (count >= _maxLicenses).
+    LicenseStateManager-->>-HttpApiServer: Returns Failure (message: "No available licenses.")
+    HttpApiServer-->>-ClientApp: 429 Too Many Requests (error message, inactive sessions list)
+
+    Note over ClientApp: Client receives list of inactive sessions<br/>for potential revocation by administrator
+```
+
+## Operational Playbook
 
 ### Prerequisites
 
@@ -201,6 +251,19 @@ The application uses configuration from `Properties/launchSettings.json` and wil
 - HTTP API Server on port **7890**
 - mDNS advertisement for `_license-server._tcp.local`
 - UDP discovery service on port **41234**
+
+### Deployment Model
+
+The application is designed to run as a **Windows Service** for production deployment. The `Program.cs` file includes the `builder.UseWindowsService()` call which enables Windows Service integration when running on Windows platforms. For other operating systems, it operates as a standard background process or daemon.
+
+**Service Installation Process:**
+
+1. Publish the application: `dotnet publish -c Release -r win-x64 --self-contained`
+2. Install as Windows Service: `sc create "LicenseServer" binPath="C:\path\to\MyLanService.exe"`
+3. Configure service startup: `sc config "LicenseServer" start=auto`
+4. Start the service: `sc start "LicenseServer"`
+
+The service will automatically start on system boot and manage its embedded PostgreSQL instance throughout the system lifecycle.
 
 ### First-Time Provisioning
 
@@ -267,6 +330,24 @@ Database: postgres
 ```
 
 Use any PostgreSQL client (pgAdmin, psql, etc.) with these credentials.
+
+### Manual Database Inspection
+
+The physical database files are located in the `pgdata` subdirectory of the application's shared data folder. This location varies by operating system and environment:
+
+**Development Environment:**
+
+- **Windows:** `C:\ProgramData\CyphersolDev\pgdata`
+- **macOS:** `/Users/Shared/CyphersolDev/pgdata`
+- **Linux:** `/usr/share/CyphersolDev/pgdata`
+
+**Production Environment:**
+
+- **Windows:** `C:\ProgramData\Cyphersol\pgdata`
+- **macOS:** `/Users/Shared/Cyphersol/pgdata`
+- **Linux:** `/usr/share/Cyphersol/pgdata`
+
+This location is critical for manual backups, data recovery operations, and troubleshooting database corruption issues. The directory contains the complete PostgreSQL data cluster including configuration files (`postgresql.conf`, `pg_hba.conf`), transaction logs, and table data files.
 
 ### Firewall
 
