@@ -256,9 +256,21 @@ The application uses configuration from `Properties/launchSettings.json` and wil
 
 The application is designed to run as a **Windows Service** for production deployment. The `Program.cs` file includes the `builder.UseWindowsService()` call which enables Windows Service integration when running on Windows platforms. For other operating systems, it operates as a standard background process or daemon.
 
+**Publishing the Application:**
+
+For Windows:
+```bash
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish
+```
+
+For Mac:
+```bash
+dotnet publish -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true -o ./publish
+```
+
 **Service Installation Process:**
 
-1. Publish the application: `dotnet publish -c Release -r win-x64 --self-contained`
+1. Publish the application using the appropriate command above
 2. Install as Windows Service: `sc create "LicenseServer" binPath="C:\path\to\MyLanService.exe"`
 3. Configure service startup: `sc config "LicenseServer" start=auto`
 4. Start the service: `sc start "LicenseServer"`
