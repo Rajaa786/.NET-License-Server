@@ -2,7 +2,11 @@
 
 ## Executive Summary
 
-This project delivers a self-hosted, on-premise .NET Worker Service that provides centralized license and database management for client applications within local network environments. Designed specifically for organizations requiring minimal setup complexity and maximum operational autonomy, the system eliminates traditional infrastructure dependencies through its embedded PostgreSQL database, automatic network discovery protocols, and machine-bound license encryption. The solution embodies an "appliance" deployment model, where a single executable provides complete database and licensing services without requiring dedicated database administrators, complex network configurations, or external service dependencies.
+**Transform your enterprise software deployment from complex to effortless.** This self-hosted .NET Worker Service revolutionizes license and database management by eliminating the traditional pain points that plague enterprise environments. Instead of wrestling with separate database installations, intricate network configurations, and fragile infrastructure dependencies, you get a single executable that "just works."
+
+**Deploy once, manage everywhere.** The system automatically discovers and connects client applications across your network using mDNS and UDP protocols, while its embedded PostgreSQL database requires zero database administration. Machine-bound license encryption ensures security without sacrificing simplicity. Whether you're rolling out to 5 workstations or 500, the experience remains consistently simple—download, run, and your infrastructure is ready.
+
+**Built for real-world enterprise needs.** Organizations choose this solution when they need enterprise-grade capabilities with startup-level operational simplicity. No more coordinating between database teams, network administrators, and security specialists. The "appliance" model delivers complete database and licensing services through a single binary that handles everything transparently.
 
 ## Core Features
 
@@ -55,14 +59,14 @@ graph TD
     end
 
     subgraph "System Boundary"
-        A[Presentation & API Layer]
-        B[Business Logic Layer]
-        C[Data Access Layer]
+        A["<b>Presentation & API Layer</b><br/><i>HttpApiServer.cs, LicenseExpiryMiddleware.cs<br/>MdnsAdvertiser.cs, UdpDiscoveryService.cs</i>"]
+        B["<b>Business Logic Layer</b><br/><i>LicenseStateManager.cs, LicenseInfoProvider.cs<br/>LicenseHelper.cs, EncryptionUtility.cs</i>"]
+        C["<b>Data Access Layer</b><br/><i>EmbeddedPostgresManager.cs, ApplicationDbContext.cs<br/>DatabaseManager.cs</i>"]
     end
 
-    ClientApp -- "HTTP/S" --> A
-    A -- "Calls" --> B
-    B -- "Accesses" --> C
+    ClientApp -- "HTTP/S Requests" --> A
+    A -- "License Operations" --> B
+    B -- "Data Persistence" --> C
 
     classDef layer fill:#f9f9f9,stroke:#333,stroke-width:2px,color:#000;
     class A,B,C layer;
@@ -229,28 +233,93 @@ sequenceDiagram
 
 ### Prerequisites
 
-- **.NET 9.0 SDK** - Required for building and running the application
+- **.NET 9.0 SDK** - Required for building and running the application ([Download here](https://dotnet.microsoft.com/download))
 - **Administrative privileges** - Needed for embedded PostgreSQL setup and network service binding
+- **Git** - For cloning the repository ([Download here](https://git-scm.com/downloads))
+- **Visual Studio Code (Recommended)** - For optimal development experience ([Download here](https://code.visualstudio.com/))
 
-### Installation
+### Complete Setup Guide for New Developers
+
+This step-by-step guide will get you from zero to running in under 10 minutes:
+
+#### Step 1: Install Development Environment
+
+1. **Install .NET 9.0 SDK:**
+   ```bash
+   # Verify installation
+   dotnet --version
+   # Should show: 9.0.x
+   ```
+
+2. **Install Visual Studio Code:**
+   - Download and install VS Code
+   - Install the **C# Dev Kit** extension (provides IntelliSense, debugging, and project management)
+   - Install the **C#** extension by Microsoft
+   - Optional: Install the **REST Client** extension for testing API endpoints
+
+#### Step 2: Clone and Setup Project
 
 ```bash
+# Clone the repository
 git clone <repository-url>
-cd License-Server
+cd MyLanService
+
+# Restore NuGet packages
 dotnet restore
+
+# Verify build works
+dotnet build
 ```
 
-### Running Locally
+#### Step 3: Configure VS Code (Optional but Recommended)
 
+Open the project in VS Code:
+```bash
+code .
+```
+
+VS Code will automatically:
+- Detect the .NET project and configure IntelliSense
+- Create `.vscode/launch.json` for debugging
+- Set up build tasks
+
+#### Step 4: First Run
+
+**Option A - Command Line:**
 ```bash
 dotnet run
 ```
 
-The application uses configuration from `Properties/launchSettings.json` and will start:
+**Option B - VS Code Debugging:**
+1. Press `F5` or go to Run → Start Debugging
+2. VS Code will build and launch with debugging enabled
+3. Set breakpoints by clicking in the margin next to line numbers
 
-- HTTP API Server on port **7890**
-- mDNS advertisement for `_license-server._tcp.local`
-- UDP discovery service on port **41234**
+#### Step 5: Verify Everything Works
+
+Once the application starts, you should see console output indicating:
+
+```
+✓ HTTP API Server started on port 7890
+✓ mDNS advertisement active for _license-server._tcp.local
+✓ UDP discovery service listening on port 41234
+✓ Embedded PostgreSQL management ready
+```
+
+Test the health endpoint:
+```bash
+# Using curl
+curl http://localhost:7890/api/health
+
+# Using PowerShell
+Invoke-RestMethod -Uri "http://localhost:7890/api/health"
+```
+
+#### Troubleshooting First Run
+
+- **Port 7890 already in use:** Another instance might be running. Check Task Manager/Activity Monitor
+- **Permission denied errors:** Run your terminal/VS Code as Administrator (Windows) or with sudo (Mac/Linux)
+- **PostgreSQL fails to start:** Ensure no other PostgreSQL instances are running on port 5432
 
 ### Deployment Model
 
@@ -301,6 +370,59 @@ The following steps must be performed in sequence for initial setup:
      "license_key": "your-license-key-here"
    }
    ```
+
+### Common Operational Tasks
+
+#### Manually Revoking a User's License
+
+When all license slots are occupied and you need to free up a slot for a new user, follow this process:
+
+1. **List all current sessions:**
+   ```bash
+   GET /api/license/sessions
+   ```
+   
+   This returns a JSON array with session details:
+   ```json
+   [
+     {
+       "sessionKey": "abc123...",
+       "clientId": "user@workstation1",
+       "hostname": "WORKSTATION-01",
+       "isActive": false,
+       "assignedAt": "2024-01-15T09:30:00Z",
+       "lastActivityAt": "2024-01-15T11:45:00Z"
+     }
+   ]
+   ```
+
+2. **Identify the session to revoke:**
+   - Look for inactive sessions (`"isActive": false`) first
+   - Check `lastActivityAt` timestamps to find stale sessions
+   - Note the `clientId` and `hostname` for the target session
+
+3. **Revoke the specific license:**
+   ```bash
+   POST /api/license/release
+   Content-Type: application/json
+   {
+     "clientId": "user@workstation1",
+     "hostname": "WORKSTATION-01"
+   }
+   ```
+
+4. **Verify the license was released:**
+   ```bash
+   GET /api/license/sessions
+   ```
+   
+   The target session should no longer appear in the list, freeing up a slot for new users.
+
+**Best Practices:**
+- Always revoke inactive sessions before active ones
+- Communicate with users before revoking active sessions
+- Consider the `lastActivityAt` timestamp - sessions idle for > 24 hours are good candidates
+- Document which sessions you revoke for audit purposes
 
 ## API Endpoint Reference
 
