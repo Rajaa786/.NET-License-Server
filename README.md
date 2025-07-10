@@ -233,7 +233,7 @@ sequenceDiagram
 
 ### Prerequisites
 
-- **.NET 9.0 SDK** - Required for building and running the application ([Download here](https://dotnet.microsoft.com/download))
+- **.NET 9.0 SDK** - Required for building and running the application ([Download .NET 9.0.7 SDK](https://dotnet.microsoft.com/en-us/download))
 - **Administrative privileges** - Needed for embedded PostgreSQL setup and network service binding
 - **Git** - For cloning the repository ([Download here](https://git-scm.com/downloads))
 - **Visual Studio Code (Recommended)** - For optimal development experience ([Download here](https://code.visualstudio.com/))
