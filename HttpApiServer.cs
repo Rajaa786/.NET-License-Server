@@ -718,10 +718,40 @@ namespace MyLanService
 
                     if (revoked)
                     {
+                        _logger.LogInformation("Session revoked successfully: {Message}", message);
                         return Results.Ok(new { success = true, message });
                     }
                     else
                     {
+                        _logger.LogWarning("Failed to revoke session: {Message}", message);
+                        return Results.BadRequest(new { success = false, message });
+                    }
+                }
+            );
+
+            app.MapPost(
+                "/api/license/hard-revoke-session",
+                async (HttpContext context) =>
+                {
+                    var json = await context.Request.ReadFromJsonAsync<Dictionary<string, string>>();
+
+                    if (json == null || !json.TryGetValue("sessionKey", out var sessionKey) || string.IsNullOrWhiteSpace(sessionKey))
+                    {
+                        return Results.BadRequest(new { success = false, error = "Missing or invalid session key." });
+                    }
+
+                    _logger.LogInformation("Revoke active session request: {SessionKey}", sessionKey);
+
+                    bool revoked = _licenseStateManager.HardRevokeSession(sessionKey, out string message);
+
+                    if (revoked)
+                    {
+                        _logger.LogInformation("Active session revoked successfully: {Message}", message);
+                        return Results.Ok(new { success = true, message });
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to revoke active session: {Message}", message);
                         return Results.BadRequest(new { success = false, message });
                     }
                 }

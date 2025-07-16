@@ -97,7 +97,7 @@ try
                         var conn = pgManager.GetConnectionString(
                             database: "postgres",
                             username: "postgres",
-                            password: "password",
+                            password: null,  // Use trust authentication for localhost
                             host: "localhost",
                             port: 5432
                         );

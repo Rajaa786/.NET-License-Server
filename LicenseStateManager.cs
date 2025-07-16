@@ -331,6 +331,26 @@ namespace MyLanService
             }
         }
 
+        public bool HardRevokeSession(string sessionKey, out string message)
+        {
+            lock (_lock)
+            {
+                if (_activeLicenses.TryGetValue(sessionKey, out var session))
+                {
+                
+                    _activeLicenses.TryRemove(sessionKey, out _);
+                    message = "Active session revoked successfully.";
+                    return true;
+                   
+                }
+                else
+                {
+                    message = "Session not found.";
+                    return false;
+                }
+            }
+        }
+
         public IEnumerable<object> GetInactiveLicensesWithKey()
         {
             lock (_lock)

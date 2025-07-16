@@ -70,7 +70,7 @@ namespace MyLanService
                 dbDir: dbDir,
                 port: port,
                 instanceId: InstanceId,
-                addLocalUserAccessPermission: true,
+                // addLocalUserAccessPermission: true,
                 pgServerParams: serverParams
             );
             await _server.StartAsync();
@@ -241,7 +241,12 @@ namespace MyLanService
                 // Method 2: Fall back to pg_ctl if SQL method fails
                 _logger.LogInformation("Falling back to pg_ctl for configuration reload...");
 
-                string BinDir = Path.Combine(dataDir, "bin");
+
+
+                // string BinDir = Path.Combine(dataDir, "bin");
+                string dataParentDir = Directory.GetParent(dataDir).FullName;
+                _logger.LogInformation("Data parent directory: {DataParentDir}", dataParentDir);
+                string BinDir = Path.Combine(dataParentDir, "bin");
                 string pgCtlPath = Path.Combine(BinDir, "pg_ctl");
 
                 var process = new System.Diagnostics.Process
@@ -250,6 +255,7 @@ namespace MyLanService
                     {
                         FileName = pgCtlPath,
                         Arguments = $"reload -D \"{dataDir}\"",
+                        WorkingDirectory = dataParentDir,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
                         UseShellExecute = false,
@@ -397,7 +403,7 @@ namespace MyLanService
         public string GetConnectionString(
             string database = "postgres",
             string username = "postgres",
-            string password = "password",
+            string password = null,
             string host = "127.0.0.1",
             int port = 5432
         )
